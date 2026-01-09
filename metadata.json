@@ -1,0 +1,7 @@
+{
+  "name": "BelezaAdmin - Central de Agendamentos e Vendas",
+  "description": "Uma plataforma completa para gestão de barbearias e salões, com agendamento de horários, loja integrada e dashboard administrativo central com split de pagamentos.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
