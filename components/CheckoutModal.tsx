@@ -307,7 +307,7 @@ export default function CheckoutModal({
                           onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
                           placeholder="0000 0000 0000 0000"
                           maxLength={19}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono"
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
                         />
                       </div>
                       <div>
@@ -319,7 +319,7 @@ export default function CheckoutModal({
                           value={cardName}
                           onChange={(e) => setCardName(e.target.value.toUpperCase())}
                           placeholder="NOME COMPLETO"
-                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none"
+                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-900"
                         />
                       </div>
                       <div className="grid grid-cols-2 gap-4">
@@ -333,7 +333,7 @@ export default function CheckoutModal({
                             onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
                             placeholder="MM/AA"
                             maxLength={5}
-                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
                           />
                         </div>
                         <div>
@@ -346,7 +346,7 @@ export default function CheckoutModal({
                             onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').substring(0, 4))}
                             placeholder="123"
                             maxLength={4}
-                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
                           />
                         </div>
                       </div>
