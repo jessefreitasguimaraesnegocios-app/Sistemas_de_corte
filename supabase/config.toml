@@ -1,0 +1,4 @@
+[project]
+
+[functions.createPayment]
+verify_jwt = false

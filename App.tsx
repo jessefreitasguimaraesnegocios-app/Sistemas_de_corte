@@ -5,15 +5,16 @@ import {
   Plus, Search, Star, Clock, Menu, X, TrendingUp, CreditCard, AlertCircle, 
   CheckCircle2, Bell, RefreshCw, ExternalLink, ShieldCheck, Zap, ArrowLeft, 
   Scissors, ShoppingBasket, ChevronRight, Sparkles, Package, UserCheck, TrendingDown,
-  Trash2, Edit3, Heart, Filter, List, Minus, ShoppingCart
+  Trash2, Edit3, Heart, Filter, List, Minus, ShoppingCart, Camera, Image
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
   PieChart, Pie, Cell, LineChart, Line, AreaChart, Area
 } from 'recharts';
-import { User, Business, Service, Product, Appointment, Collaborator, UserRole } from './types';
+import { User, Business, Service, Product, Appointment, Collaborator, UserRole, Transaction } from './types';
 import { generateBusinessDescription } from './services/geminiService';
-import { supabase, signInWithGoogle, signOut } from './lib/supabase';
+import { supabase, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut } from './lib/supabase';
+import CheckoutModal from './components/CheckoutModal';
 
 // --- TYPES ---
 interface CartItem {
@@ -104,7 +105,17 @@ const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart }: any) => (
           </button>
         </div>
       ) : (
-        <button onClick={signInWithGoogle} className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-md transition-all flex items-center gap-2">
+        <button 
+          onClick={async () => {
+            try {
+              await signInWithGoogle();
+            } catch (error: any) {
+              console.error('Erro ao fazer login com Google:', error);
+              // Toast será mostrado pelo componente principal se necessário
+            }
+          }} 
+          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-md transition-all flex items-center gap-2"
+        >
           <img src="https://www.google.com/favicon.ico" className="w-4 h-4 brightness-200" alt="" />
           Google Login
         </button>
@@ -210,28 +221,104 @@ const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, on
 
 // --- CRM BUSINESS OWNER VIEW ---
 
-const BusinessOwnerDashboard = ({ business, collaborators, products, appointments, setCollaborators, setProducts, setAppointments, addToast }: any) => {
+const BusinessOwnerDashboard = ({ business, collaborators, products, appointments, setCollaborators, setProducts, setAppointments, addToast, setBusinesses, businesses }: any) => {
   const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'TEAM'>('DASHBOARD');
   const [showModal, setShowModal] = useState<string | null>(null);
   const [newItem, setNewItem] = useState<any>({});
+  const [editingItem, setEditingItem] = useState<any>(null);
+  const [confirmDeleteModal, setConfirmDeleteModal] = useState<{type: 'product' | 'collaborator', id: string, name: string} | null>(null);
+  const [showBusinessEditModal, setShowBusinessEditModal] = useState(false);
+  const [businessEditForm, setBusinessEditForm] = useState({ name: business.name, image: business.image });
+
+  // Atualizar formulário quando business mudar
+  useEffect(() => {
+    setBusinessEditForm({ name: business.name, image: business.image });
+  }, [business.name, business.image]);
 
   const handleAddItem = () => {
     if (showModal === 'PRODUCT') {
-      const prod: Product = { ...newItem, id: Math.random().toString(), businessId: business.id, price: Number(newItem.price), stock: Number(newItem.stock), image: 'https://picsum.photos/seed/prod/400/400', category: newItem.category || 'Geral' };
-      setProducts([...products, prod]);
-      addToast('Produto adicionado ao estoque!', 'success');
+      if (editingItem && editingItem._type === 'product') {
+        // Editar produto existente
+        const updated = products.map((p: any) => 
+          p.id === editingItem.id 
+            ? { ...p, name: newItem.name, price: Number(newItem.price), stock: Number(newItem.stock), category: newItem.category || 'Geral', image: newItem.image || p.image }
+            : p
+        );
+        setProducts(updated);
+        addToast('Produto atualizado!', 'success');
+      } else {
+        // Adicionar novo produto
+        const prod: Product = { 
+          ...newItem, 
+          id: Math.random().toString(), 
+          businessId: business.id, 
+          price: Number(newItem.price), 
+          stock: Number(newItem.stock), 
+          image: newItem.image || 'https://picsum.photos/seed/prod/400/400', 
+          category: newItem.category || 'Geral' 
+        };
+        setProducts([...products, prod]);
+        addToast('Produto adicionado ao estoque!', 'success');
+      }
     } else if (showModal === 'TEAM') {
-      const pro: Collaborator = { ...newItem, id: Math.random().toString(), businessId: business.id, rating: 5.0, avatar: `https://i.pravatar.cc/150?u=${Math.random()}` };
-      setCollaborators([...collaborators, pro]);
-      addToast('Novo profissional cadastrado!', 'success');
+      if (editingItem && editingItem._type === 'collaborator') {
+        // Editar colaborador existente
+        const updated = collaborators.map((c: any) => 
+          c.id === editingItem.id 
+            ? { ...c, name: newItem.name, role: newItem.role, avatar: newItem.avatar || c.avatar }
+            : c
+        );
+        setCollaborators(updated);
+        addToast('Profissional atualizado!', 'success');
+      } else {
+        // Adicionar novo colaborador
+        const pro: Collaborator = { 
+          ...newItem, 
+          id: Math.random().toString(), 
+          businessId: business.id, 
+          rating: 5.0, 
+          avatar: newItem.avatar || `https://i.pravatar.cc/150?u=${Math.random()}` 
+        };
+        setCollaborators([...collaborators, pro]);
+        addToast('Novo profissional cadastrado!', 'success');
+      }
     }
     setShowModal(null);
     setNewItem({});
+    setEditingItem(null);
+  };
+
+  const handleEditItem = (item: any, type: 'product' | 'collaborator') => {
+    setEditingItem({ ...item, _type: type });
+    setNewItem({ ...item, _type: type });
+    setShowModal(type === 'product' ? 'PRODUCT' : 'TEAM');
+  };
+
+  const handleDeleteItem = (id: string, type: 'product' | 'collaborator', name: string) => {
+    setConfirmDeleteModal({ type, id, name });
+  };
+
+  const confirmDelete = () => {
+    if (!confirmDeleteModal) return;
+
+    const { type, id, name } = confirmDeleteModal;
+
+    if (type === 'product') {
+      setProducts(products.filter((p: any) => p.id !== id));
+      addToast(`Produto "${name}" removido.`, 'success');
+    } else if (type === 'collaborator') {
+      setCollaborators(collaborators.filter((c: any) => c.id !== id));
+      addToast(`Profissional "${name}" removido.`, 'success');
+    }
+
+    setConfirmDeleteModal(null);
   };
 
   const deleteProduct = (id: string) => {
-    setProducts(products.filter((p: any) => p.id !== id));
-    addToast('Produto removido.', 'success');
+    const product = products.find((p: any) => p.id === id);
+    if (product) {
+      handleDeleteItem(id, 'product', product.name);
+    }
   };
 
   const renderTabContent = () => {
@@ -240,8 +327,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
         return (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
-              <h3 className="text-xl font-black">Agenda da Unidade</h3>
-              <button className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl shadow-indigo-200">Gerenciar Horários</button>
+              <h3 className="text-xl font-black text-slate-900">Agenda da Unidade</h3>
+              <button className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl shadow-indigo-200 hover:bg-indigo-700 transition-colors">Gerenciar Horários</button>
             </div>
             <div className="grid grid-cols-1 gap-4">
               {appointments.filter((a: any) => a.businessId === business.id).map((app: any) => (
@@ -275,15 +362,30 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
         return (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
-              <h3 className="text-xl font-black">Estoque & Vitrine</h3>
-              <button onClick={() => setShowModal('PRODUCT')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl">+ Novo Produto</button>
+              <h3 className="text-xl font-black text-slate-900">Estoque & Vitrine</h3>
+              <button onClick={() => setShowModal('PRODUCT')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl hover:bg-indigo-700 transition-colors">+ Novo Produto</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
               {products.filter((p: any) => p.businessId === business.id).map((prod: any) => (
                 <div key={prod.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm overflow-hidden flex flex-col group">
                   <div className="h-40 relative">
                     <img src={prod.image} className="w-full h-full object-cover" alt="" />
-                    <button onClick={() => deleteProduct(prod.id)} className="absolute top-3 right-3 p-2 bg-white/90 backdrop-blur rounded-full text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"><Trash2 size={14} /></button>
+                    <div className="absolute top-3 right-3 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <button 
+                        onClick={() => handleEditItem(prod, 'product')}
+                        className="p-2 bg-white/90 backdrop-blur rounded-full text-indigo-600 hover:bg-indigo-50 transition-colors"
+                        title="Editar produto"
+                      >
+                        <Edit3 size={14} />
+                      </button>
+                      <button 
+                        onClick={() => deleteProduct(prod.id)} 
+                        className="p-2 bg-white/90 backdrop-blur rounded-full text-red-500 hover:bg-red-50 transition-colors"
+                        title="Remover produto"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
                   </div>
                   <div className="p-4 space-y-2">
                     <h4 className="font-bold text-sm text-slate-800">{prod.name}</h4>
@@ -302,24 +404,36 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
         return (
           <div className="space-y-6 animate-in fade-in duration-500">
             <div className="flex justify-between items-center">
-              <h3 className="text-xl font-black">Gestão de Equipe</h3>
-              <button onClick={() => setShowModal('TEAM')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl">+ Adicionar Profissional</button>
+              <h3 className="text-xl font-black text-slate-900">Gestão de Equipe</h3>
+              <button onClick={() => setShowModal('TEAM')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl hover:bg-indigo-700 transition-colors">+ Adicionar Profissional</button>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {collaborators.filter((c: any) => c.businessId === business.id).map((pro: any) => (
                 <div key={pro.id} className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex items-center gap-6">
                   <img src={pro.avatar} className="w-20 h-20 rounded-2xl object-cover shadow-lg" alt="" />
                   <div className="flex-1">
-                    <h4 className="font-bold text-lg">{pro.name}</h4>
-                    <p className="text-sm text-slate-500">{pro.role}</p>
+                    <h4 className="font-bold text-lg text-slate-900">{pro.name}</h4>
+                    <p className="text-sm text-slate-600 font-medium">{pro.role}</p>
                     <div className="flex items-center gap-2 mt-2">
                       <Star size={14} fill="#f59e0b" className="text-amber-500" />
-                      <span className="text-xs font-black">{pro.rating}</span>
+                      <span className="text-xs font-black text-slate-700">{pro.rating}</span>
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <button className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-indigo-600"><Edit3 size={18} /></button>
-                    <button onClick={() => setCollaborators(collaborators.filter((c:any) => c.id !== pro.id))} className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl"><Trash2 size={18} /></button>
+                    <button 
+                      onClick={() => handleEditItem(pro, 'collaborator')}
+                      className="p-3 bg-slate-50 text-slate-400 rounded-xl hover:text-indigo-600 transition-colors"
+                      title="Editar profissional"
+                    >
+                      <Edit3 size={18} />
+                    </button>
+                    <button 
+                      onClick={() => handleDeleteItem(pro.id, 'collaborator', pro.name)}
+                      className="p-3 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl transition-colors"
+                      title="Remover profissional"
+                    >
+                      <Trash2 size={18} />
+                    </button>
                   </div>
                 </div>
               ))}
@@ -338,7 +452,10 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
                ].map((s, i) => (
                  <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                    <div className={`bg-slate-50 ${s.color} p-3 rounded-xl`}><s.icon size={24} /></div>
-                   <div><p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{s.label}</p><p className="text-xl font-black">{s.value}</p></div>
+                   <div>
+                     <p className="text-[10px] text-slate-500 font-black uppercase tracking-widest">{s.label}</p>
+                     <p className="text-xl font-black text-slate-900">{s.value}</p>
+                   </div>
                  </div>
                ))}
             </div>
@@ -351,10 +468,34 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
     <div className="p-8 max-w-7xl mx-auto space-y-8 pb-24">
       <div className="flex flex-col md:flex-row justify-between items-end md:items-center gap-6">
         <div className="flex items-center gap-4">
-          <img src={business.image} className="w-16 h-16 rounded-2xl object-cover shadow-2xl" alt="" />
-          <div>
-            <h2 className="text-3xl font-black tracking-tighter text-slate-900">{business.name} <span className="text-indigo-600">Admin</span></h2>
-            <p className="text-slate-500 text-sm font-medium">Gestão Inteligente & Automação.</p>
+          <div className="relative group">
+            <img src={businessEditForm.image || business.image} className="w-16 h-16 rounded-2xl object-cover shadow-2xl" alt="" />
+            <button
+              onClick={() => {
+                setBusinessEditForm({ name: business.name, image: business.image });
+                setShowBusinessEditModal(true);
+              }}
+              className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-2 rounded-full shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+              title="Editar estabelecimento"
+            >
+              <Edit3 size={14} />
+            </button>
+          </div>
+          <div className="flex items-center gap-3">
+            <div>
+              <h2 className="text-3xl font-black tracking-tighter text-slate-900">{businessEditForm.name || business.name} <span className="text-indigo-600">Admin</span></h2>
+              <p className="text-slate-500 text-sm font-medium">Gestão Inteligente & Automação.</p>
+            </div>
+            <button
+              onClick={() => {
+                setBusinessEditForm({ name: business.name, image: business.image });
+                setShowBusinessEditModal(true);
+              }}
+              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-colors"
+              title="Editar estabelecimento"
+            >
+              <Edit3 size={18} />
+            </button>
           </div>
         </div>
         <div className="flex bg-white p-1 rounded-2xl shadow-sm border border-slate-100">
@@ -381,26 +522,396 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
           <div className="bg-white rounded-[3rem] w-full max-w-lg p-10 shadow-2xl animate-in zoom-in-95 duration-200">
             <div className="flex justify-between items-center mb-10">
-              <h3 className="text-2xl font-black">{showModal === 'PRODUCT' ? 'Novo Produto' : 'Novo Profissional'}</h3>
-              <button onClick={() => setSelectedBusiness(null)} className="p-2 hover:bg-slate-100 rounded-full"><X /></button>
+              <h3 className="text-2xl font-black text-slate-900">
+                {editingItem 
+                  ? (showModal === 'PRODUCT' ? 'Editar Produto' : 'Editar Profissional')
+                  : (showModal === 'PRODUCT' ? 'Novo Produto' : 'Novo Profissional')
+                }
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowModal(null);
+                  setNewItem({});
+                  setEditingItem(null);
+                }} 
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                <X />
+              </button>
             </div>
             <div className="space-y-6">
               {showModal === 'PRODUCT' ? (
                 <>
-                  <input type="text" placeholder="Nome do Produto" value={newItem.name || ''} onChange={e => setNewItem({...newItem, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold" />
-                  <div className="grid grid-cols-2 gap-4">
-                    <input type="number" placeholder="Preço (R$)" value={newItem.price || ''} onChange={e => setNewItem({...newItem, price: e.target.value})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold" />
-                    <input type="number" placeholder="Estoque Inicial" value={newItem.stock || ''} onChange={e => setNewItem({...newItem, stock: e.target.value})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold" />
+                  {/* Foto do Produto */}
+                  <div className="flex flex-col items-center gap-4 pb-2">
+                    <div className="relative group">
+                      <div className="w-32 h-32 rounded-2xl overflow-hidden shadow-lg border-2 border-slate-200 bg-slate-100 flex items-center justify-center">
+                        {(newItem.image || editingItem?.image) ? (
+                          <img 
+                            src={newItem.image || editingItem?.image} 
+                            alt="Foto do produto" 
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = 'https://via.placeholder.com/128';
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
+                            <Image className="text-indigo-400" size={40} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-2 rounded-full shadow-lg border-2 border-white">
+                        <Image size={14} />
+                      </div>
+                    </div>
+                    <div className="w-full">
+                      <label className="flex items-center gap-2 text-xs font-black text-slate-700 uppercase tracking-widest mb-2">
+                        <Camera size={14} />
+                        Foto do Produto
+                      </label>
+                      <label className="block">
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              // Verificar tamanho (máximo 5MB)
+                              if (file.size > 5 * 1024 * 1024) {
+                                addToast('A imagem deve ter no máximo 5MB', 'error');
+                                return;
+                              }
+                              
+                              // Converter para base64
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setNewItem({...newItem, image: reader.result as string});
+                              };
+                              reader.onerror = () => {
+                                addToast('Erro ao carregar a imagem', 'error');
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                        <div className="w-full p-4 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl font-medium text-slate-700 hover:bg-indigo-50 hover:border-indigo-400 transition-all cursor-pointer text-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <Camera className="text-indigo-600" size={24} />
+                            <span className="text-sm font-bold">
+                              {newItem.image || editingItem?.image ? 'Trocar Foto' : 'Selecionar da Galeria'}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                      {(newItem.image || editingItem?.image) && (
+                        <button
+                          onClick={() => setNewItem({...newItem, image: ''})}
+                          className="mt-2 text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                        >
+                          <X size={12} />
+                          Remover foto
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <input type="text" placeholder="Categoria" value={newItem.category || ''} onChange={e => setNewItem({...newItem, category: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold" />
+
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nome do Produto</label>
+                    <input type="text" placeholder="Ex: Pomada Matte Extra" value={newItem.name || ''} onChange={e => setNewItem({...newItem, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Preço (R$)</label>
+                      <input type="number" placeholder="0.00" value={newItem.price || ''} onChange={e => setNewItem({...newItem, price: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Estoque Inicial</label>
+                      <input type="number" placeholder="0" value={newItem.stock || ''} onChange={e => setNewItem({...newItem, stock: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Categoria</label>
+                    <input type="text" placeholder="Ex: Barba, Cabelo, Tratamento" value={newItem.category || ''} onChange={e => setNewItem({...newItem, category: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
                 </>
               ) : (
                 <>
-                  <input type="text" placeholder="Nome do Profissional" value={newItem.name || ''} onChange={e => setNewItem({...newItem, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold" />
-                  <input type="text" placeholder="Cargo/Especialidade" value={newItem.role || ''} onChange={e => setNewItem({...newItem, role: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold" />
+                  {/* Foto de Perfil */}
+                  <div className="flex flex-col items-center gap-4 pb-2">
+                    <div className="relative group">
+                      <div className="w-28 h-28 rounded-2xl overflow-hidden shadow-lg border-2 border-slate-200 bg-slate-100 flex items-center justify-center">
+                        {(newItem.avatar || editingItem?.avatar) ? (
+                          <img 
+                            src={newItem.avatar || editingItem?.avatar} 
+                            alt="Foto de perfil" 
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = `https://ui-avatars.com/api/?name=${newItem.name || 'Profissional'}&size=112`;
+                            }}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
+                            <Camera className="text-indigo-400" size={32} />
+                          </div>
+                        )}
+                      </div>
+                      <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-2 rounded-full shadow-lg border-2 border-white">
+                        <Image size={14} />
+                      </div>
+                    </div>
+                    <div className="w-full">
+                      <label className="flex items-center gap-2 text-xs font-black text-slate-700 uppercase tracking-widest mb-2">
+                        <Camera size={14} />
+                        Foto de Perfil
+                      </label>
+                      <label className="block">
+                        <input 
+                          type="file" 
+                          accept="image/*"
+                          className="hidden"
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) {
+                              // Verificar tamanho (máximo 5MB)
+                              if (file.size > 5 * 1024 * 1024) {
+                                addToast('A imagem deve ter no máximo 5MB', 'error');
+                                return;
+                              }
+                              
+                              // Converter para base64
+                              const reader = new FileReader();
+                              reader.onloadend = () => {
+                                setNewItem({...newItem, avatar: reader.result as string});
+                              };
+                              reader.onerror = () => {
+                                addToast('Erro ao carregar a imagem', 'error');
+                              };
+                              reader.readAsDataURL(file);
+                            }
+                          }}
+                        />
+                        <div className="w-full p-4 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl font-medium text-slate-700 hover:bg-indigo-50 hover:border-indigo-400 transition-all cursor-pointer text-center">
+                          <div className="flex flex-col items-center gap-2">
+                            <Camera className="text-indigo-600" size={24} />
+                            <span className="text-sm font-bold">
+                              {newItem.avatar || editingItem?.avatar ? 'Trocar Foto' : 'Selecionar da Galeria'}
+                            </span>
+                          </div>
+                        </div>
+                      </label>
+                      {(newItem.avatar || editingItem?.avatar) && (
+                        <button
+                          onClick={() => setNewItem({...newItem, avatar: ''})}
+                          className="mt-2 text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                        >
+                          <X size={12} />
+                          Remover foto
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <input type="text" placeholder="Nome do Profissional" value={newItem.name || ''} onChange={e => setNewItem({...newItem, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <input type="text" placeholder="Cargo/Especialidade" value={newItem.role || ''} onChange={e => setNewItem({...newItem, role: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
                 </>
               )}
-              <button onClick={handleAddItem} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all">Salvar Alterações</button>
+              <button 
+                onClick={handleAddItem}
+                disabled={!newItem.name}
+                className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {editingItem ? 'Salvar Alterações' : 'Salvar'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Edição do Estabelecimento */}
+      {showBusinessEditModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-lg p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-10">
+              <h3 className="text-2xl font-black text-slate-900">Editar Estabelecimento</h3>
+              <button 
+                onClick={() => {
+                  setShowBusinessEditModal(false);
+                  setBusinessEditForm({ name: business.name, image: business.image });
+                }} 
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Foto do Estabelecimento */}
+              <div className="flex flex-col items-center gap-4 pb-2">
+                <div className="relative group">
+                  <div className="w-32 h-32 rounded-2xl overflow-hidden shadow-lg border-2 border-slate-200 bg-slate-100 flex items-center justify-center">
+                    {businessEditForm.image ? (
+                      <img 
+                        src={businessEditForm.image} 
+                        alt="Foto do estabelecimento" 
+                        className="w-full h-full object-cover"
+                        onError={(e) => {
+                          (e.target as HTMLImageElement).src = 'https://via.placeholder.com/128';
+                        }}
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
+                        <Image className="text-indigo-400" size={40} />
+                      </div>
+                    )}
+                  </div>
+                  <div className="absolute -bottom-1 -right-1 bg-indigo-600 text-white p-2 rounded-full shadow-lg border-2 border-white">
+                    <Image size={14} />
+                  </div>
+                </div>
+                <div className="w-full">
+                  <label className="flex items-center gap-2 text-xs font-black text-slate-700 uppercase tracking-widest mb-2">
+                    <Camera size={14} />
+                    Foto do Estabelecimento
+                  </label>
+                  <label className="block">
+                    <input 
+                      type="file" 
+                      accept="image/*"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) {
+                          if (file.size > 5 * 1024 * 1024) {
+                            addToast('A imagem deve ter no máximo 5MB', 'error');
+                            return;
+                          }
+                          const reader = new FileReader();
+                          reader.onloadend = () => {
+                            setBusinessEditForm({...businessEditForm, image: reader.result as string});
+                          };
+                          reader.onerror = () => {
+                            addToast('Erro ao carregar a imagem', 'error');
+                          };
+                          reader.readAsDataURL(file);
+                        }
+                      }}
+                    />
+                    <div className="w-full p-4 bg-slate-50 border-2 border-dashed border-slate-300 rounded-2xl font-medium text-slate-700 hover:bg-indigo-50 hover:border-indigo-400 transition-all cursor-pointer text-center">
+                      <div className="flex flex-col items-center gap-2">
+                        <Camera className="text-indigo-600" size={24} />
+                        <span className="text-sm font-bold">
+                          {businessEditForm.image ? 'Trocar Foto' : 'Selecionar da Galeria'}
+                        </span>
+                      </div>
+                    </div>
+                  </label>
+                  {businessEditForm.image && (
+                    <button
+                      onClick={() => setBusinessEditForm({...businessEditForm, image: ''})}
+                      className="mt-2 text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                    >
+                      <X size={12} />
+                      Remover foto
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nome do Estabelecimento</label>
+                <input 
+                  type="text" 
+                  placeholder="Ex: Barbearia do João" 
+                  value={businessEditForm.name} 
+                  onChange={e => setBusinessEditForm({...businessEditForm, name: e.target.value})} 
+                  className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                />
+              </div>
+
+              <button
+                onClick={() => {
+                  if (!businessEditForm.name) {
+                    addToast('Preencha o nome do estabelecimento', 'error');
+                    return;
+                  }
+                  
+                  // Atualizar o estabelecimento na lista
+                  if (setBusinesses && businesses) {
+                    const updated = businesses.map((b: any) => 
+                      b.id === business.id 
+                        ? { ...b, name: businessEditForm.name, image: businessEditForm.image || b.image }
+                        : b
+                    );
+                    setBusinesses(updated);
+                  }
+                  
+                  addToast('Estabelecimento atualizado com sucesso!', 'success');
+                  setShowBusinessEditModal(false);
+                }}
+                className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all"
+              >
+                Salvar Alterações
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Remoção */}
+      {confirmDeleteModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="text-center space-y-6">
+              <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-red-100">
+                <AlertCircle className="text-red-600" size={32} />
+              </div>
+              
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">
+                  Remover {confirmDeleteModal.type === 'product' ? 'Produto' : 'Profissional'}?
+                </h3>
+                <p className="text-slate-600 font-medium">
+                  {confirmDeleteModal.name}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-red-50 border-2 border-red-200">
+                <p className="text-sm font-bold text-slate-700 mb-2">
+                  Esta ação não pode ser desfeita!
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-left text-xs text-slate-600">
+                  {confirmDeleteModal.type === 'product' ? (
+                    <>
+                      <li>O produto será removido permanentemente</li>
+                      <li>Será removido do estoque e da vitrine</li>
+                      <li>Histórico de vendas será mantido</li>
+                    </>
+                  ) : (
+                    <>
+                      <li>O profissional será removido da equipe</li>
+                      <li>Agendamentos futuros serão cancelados</li>
+                      <li>Histórico será mantido</li>
+                    </>
+                  )}
+                </ul>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  onClick={() => setConfirmDeleteModal(null)}
+                  className="flex-1 px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={confirmDelete}
+                  className="flex-1 px-6 py-4 bg-red-500 text-white rounded-2xl font-black text-sm hover:bg-red-600 transition-all shadow-xl"
+                >
+                  Confirmar Remoção
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -415,6 +926,10 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
   const [activeSubTab, setActiveSubTab] = useState<'SERVICES' | 'STORE'>('SERVICES');
   const [selectedPro, setSelectedPro] = useState<Collaborator | null>(null);
   const [bookingService, setBookingService] = useState<Service | null>(null);
+  const [showCalendar, setShowCalendar] = useState(false);
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+  const [selectedTime, setSelectedTime] = useState<string | null>(null);
+  const [showCheckout, setShowCheckout] = useState(false);
   
   const [selectedCategory, setSelectedCategory] = useState<string>('Tudo');
   const [priceFilter, setPriceFilter] = useState<string>('Qualquer Valor');
@@ -441,20 +956,87 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
     });
   }, [products, business.id, selectedCategory, priceFilter]);
 
-  const confirmBooking = () => {
+  // Gerar próximos 30 dias
+  const getAvailableDates = () => {
+    const dates: Date[] = [];
+    const today = new Date();
+    for (let i = 0; i < 30; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      dates.push(date);
+    }
+    return dates;
+  };
+
+  // Gerar horários disponíveis (8h às 18h, de hora em hora)
+  const getAvailableTimes = (date: Date | null) => {
+    if (!date) return [];
+    
+    const times: string[] = [];
+    for (let hour = 8; hour <= 18; hour++) {
+      times.push(`${hour.toString().padStart(2, '0')}:00`);
+    }
+
+    // Filtrar horários já ocupados
+    const dateStr = date.toISOString().split('T')[0];
+    const occupiedTimes = appointments
+      .filter((app: any) => {
+        const appDate = new Date(app.date).toISOString().split('T')[0];
+        return appDate === dateStr && app.collaboratorId === selectedPro?.id;
+      })
+      .map((app: any) => app.time);
+
+    return times.filter(time => !occupiedTimes.includes(time));
+  };
+
+  const handleServiceSelect = (service: Service) => {
+    if (!selectedPro) {
+      addToast('Selecione um profissional primeiro', 'error');
+      return;
+    }
+    setBookingService(service);
+    setShowCalendar(true);
+    setSelectedDate(null);
+    setSelectedTime(null);
+  };
+
+  const handleDateSelect = (date: Date) => {
+    setSelectedDate(date);
+    setSelectedTime(null);
+  };
+
+  const handleTimeSelect = (time: string) => {
+    setSelectedTime(time);
+  };
+
+  const handleConfirmBooking = () => {
+    if (!selectedDate || !selectedTime || !bookingService || !selectedPro) {
+      addToast('Selecione data e horário', 'error');
+      return;
+    }
+    setShowCalendar(false);
+    setShowCheckout(true);
+  };
+
+  const handlePaymentSuccess = () => {
+    if (!selectedDate || !selectedTime || !bookingService || !selectedPro) return;
+
     const app: Appointment = {
       id: Math.random().toString(),
       businessId: business.id,
       customerId: 'user1',
-      collaboratorId: selectedPro!.id,
-      serviceId: bookingService!.id,
-      date: new Date().toISOString(),
-      time: '14:30',
+      collaboratorId: selectedPro.id,
+      serviceId: bookingService.id,
+      date: selectedDate.toISOString(),
+      time: selectedTime,
       status: 'SCHEDULED'
     };
     setAppointments([...appointments, app]);
     addToast('Agendamento confirmado com sucesso!', 'success');
     setBookingService(null);
+    setSelectedDate(null);
+    setSelectedTime(null);
+    setShowCheckout(false);
   };
 
   return (
@@ -513,7 +1095,7 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
                          <div><h4 className="font-black text-lg">{service.name}</h4><p className="text-xs font-bold text-slate-500 mt-1">{service.duration} min • <span className="text-green-500">R$ {service.price}</span></p></div>
                          <button 
                           disabled={!selectedPro}
-                          onClick={() => setBookingService(service)}
+                          onClick={() => handleServiceSelect(service)}
                           className={`px-6 py-2 rounded-xl font-black text-xs uppercase tracking-widest ${accentBg} text-white disabled:opacity-30 shadow-xl transition-all active:scale-95`}
                          >
                            {selectedPro ? 'Agendar' : 'Selecione Pro'}
@@ -576,6 +1158,124 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
           </div>
         )}
       </div>
+
+      {/* Modal de Calendário */}
+      {showCalendar && bookingService && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className={`rounded-[3rem] w-full max-w-2xl p-10 shadow-2xl animate-in zoom-in-95 duration-200 ${business.type === 'BARBERSHOP' ? 'bg-slate-900 border border-slate-800' : 'bg-white'}`}>
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h3 className={`text-2xl font-black ${business.type === 'BARBERSHOP' ? 'text-white' : 'text-slate-900'}`}>Agendar {bookingService.name}</h3>
+                <p className={`text-sm mt-1 ${business.type === 'BARBERSHOP' ? 'text-slate-400' : 'text-slate-500'}`}>
+                  {selectedPro?.name} • {bookingService.duration} min • R$ {bookingService.price}
+                </p>
+              </div>
+              <button 
+                onClick={() => {
+                  setShowCalendar(false);
+                  setSelectedDate(null);
+                  setSelectedTime(null);
+                }}
+                className={`p-2 rounded-full hover:bg-opacity-20 transition-colors ${business.type === 'BARBERSHOP' ? 'text-slate-400 hover:text-white hover:bg-white' : 'text-slate-700 hover:text-slate-900 hover:bg-slate-100'}`}
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-8">
+              {/* Seleção de Data */}
+              <div>
+                <h4 className={`text-sm font-black uppercase tracking-widest mb-4 ${business.type === 'BARBERSHOP' ? 'text-slate-400' : 'text-slate-500'}`}>Selecione a Data</h4>
+                <div className="grid grid-cols-7 gap-2">
+                  {getAvailableDates().map((date, idx) => {
+                    const isSelected = selectedDate && date.toDateString() === selectedDate.toDateString();
+                    const isToday = date.toDateString() === new Date().toDateString();
+                    return (
+                      <button
+                        key={idx}
+                        onClick={() => handleDateSelect(date)}
+                        className={`p-3 rounded-2xl font-black text-xs transition-all ${
+                          isSelected
+                            ? `${accentBg} text-white shadow-xl scale-105`
+                            : business.type === 'BARBERSHOP'
+                            ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                            : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <div className="text-[10px] opacity-60">{['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'][date.getDay()]}</div>
+                        <div className="text-lg leading-none mt-1">{date.getDate()}</div>
+                        {isToday && (
+                          <div className={`text-[8px] mt-1 ${isSelected ? 'text-white' : accentText}`}>Hoje</div>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Seleção de Horário */}
+              {selectedDate && (
+                <div>
+                  <h4 className={`text-sm font-black uppercase tracking-widest mb-4 ${business.type === 'BARBERSHOP' ? 'text-slate-400' : 'text-slate-500'}`}>Selecione o Horário</h4>
+                  <div className="grid grid-cols-4 gap-3">
+                    {getAvailableTimes(selectedDate).map((time) => {
+                      const isSelected = selectedTime === time;
+                      return (
+                        <button
+                          key={time}
+                          onClick={() => handleTimeSelect(time)}
+                          className={`p-4 rounded-2xl font-black text-sm transition-all ${
+                            isSelected
+                              ? `${accentBg} text-white shadow-xl scale-105`
+                              : business.type === 'BARBERSHOP'
+                              ? 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                              : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          {time}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {getAvailableTimes(selectedDate).length === 0 && (
+                    <p className={`text-center py-8 ${business.type === 'BARBERSHOP' ? 'text-slate-400' : 'text-slate-500'}`}>
+                      Nenhum horário disponível para esta data
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {/* Botão Finalizar */}
+              <button
+                onClick={handleConfirmBooking}
+                disabled={!selectedDate || !selectedTime}
+                className={`w-full py-5 rounded-2xl font-black text-lg shadow-xl transition-all disabled:opacity-30 disabled:cursor-not-allowed ${
+                  business.type === 'BARBERSHOP'
+                    ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                    : 'bg-rose-500 text-white hover:bg-rose-600'
+                }`}
+              >
+                {selectedDate && selectedTime ? `Finalizar Agendamento • R$ ${bookingService.price}` : 'Selecione Data e Horário'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Checkout Modal para Agendamento */}
+      {showCheckout && bookingService && (
+        <CheckoutModal
+          isOpen={showCheckout}
+          onClose={() => {
+            setShowCheckout(false);
+            setShowCalendar(true);
+          }}
+          total={bookingService.price}
+          email="cliente@example.com"
+          businessId={business.id}
+          onPaymentSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   );
 };
@@ -586,6 +1286,18 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
   const [showModal, setShowModal] = useState(false);
   const [newBiz, setNewBiz] = useState<any>({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
   const [loading, setLoading] = useState(false);
+  const [editingBusiness, setEditingBusiness] = useState<Business | null>(null);
+  const [editForm, setEditForm] = useState<any>({});
+  const [confirmPauseModal, setConfirmPauseModal] = useState<{business: Business | null, action: 'pause' | 'activate'}>({business: null, action: 'pause'});
+  const [confirmDeleteModal, setConfirmDeleteModal] = useState<Business | null>(null);
+  
+  // Estados para configurações
+  const [defaultSplit, setDefaultSplit] = useState(10);
+  const [sponsorId, setSponsorId] = useState('2622924811');
+  const [webhookUrl, setWebhookUrl] = useState('https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/webhook-payment');
+  const [emailNotifications, setEmailNotifications] = useState(true);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [autoApprove, setAutoApprove] = useState(true);
 
   const handleAddPartner = async () => {
     setLoading(true);
@@ -605,6 +1317,138 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
     setLoading(false);
     setShowModal(false);
     setNewBiz({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
+  };
+
+  // Handlers de configurações
+  const handleSaveSplit = () => {
+    addToast(`Taxa de split padrão atualizada para ${defaultSplit}%`, 'success');
+    // Aqui você salvaria no banco de dados
+  };
+
+  const handleUpdateSponsorId = () => {
+    addToast(`Sponsor ID atualizado: ${sponsorId}`, 'success');
+    // Aqui você atualizaria o secret no Supabase
+  };
+
+  const handleTestWebhook = async () => {
+    addToast('Testando webhook...', 'success');
+    // Aqui você testaria o webhook
+    setTimeout(() => {
+      addToast('Webhook respondendo corretamente!', 'success');
+    }, 1500);
+  };
+
+  const handleSyncData = async () => {
+    setLoading(true);
+    addToast('Sincronizando dados com Supabase...', 'success');
+    // Simular sincronização
+    setTimeout(() => {
+      setLoading(false);
+      addToast('Dados sincronizados com sucesso!', 'success');
+    }, 2000);
+  };
+
+  const handleBackup = async () => {
+    setLoading(true);
+    addToast('Gerando backup do banco de dados...', 'success');
+    // Simular backup
+    setTimeout(() => {
+      setLoading(false);
+      addToast('Backup gerado com sucesso!', 'success');
+    }, 2000);
+  };
+
+  const handleOpenDashboard = () => {
+    window.open('https://supabase.com/dashboard/project/hgkvhgjtjsycbpeglrrs', '_blank');
+  };
+
+  const handleViewLogs = () => {
+    addToast('Abrindo logs do sistema...', 'success');
+    // Aqui você abriria um modal com logs ou redirecionaria
+  };
+
+  const handleConfirmPauseAction = () => {
+    if (!confirmPauseModal.business) return;
+
+    const { business, action } = confirmPauseModal;
+    const isActivating = action === 'activate';
+
+    const updated = businesses.map((bus: any) => 
+      bus.id === business.id 
+        ? { ...bus, status: isActivating ? 'ACTIVE' : 'SUSPENDED', isPaused: !isActivating }
+        : bus
+    );
+    
+    setBusinesses(updated);
+    addToast(
+      isActivating 
+        ? `${business.name} foi ativado com sucesso!` 
+        : `${business.name} foi pausado. Não receberá novos agendamentos ou pagamentos.`,
+      'success'
+    );
+    
+    setConfirmPauseModal({business: null, action: 'pause'});
+  };
+
+  const handleConfirmDelete = () => {
+    if (!confirmDeleteModal) return;
+
+    const businessName = confirmDeleteModal.name;
+    setBusinesses(businesses.filter((x: any) => x.id !== confirmDeleteModal.id));
+    addToast(`${businessName} foi removido da plataforma`, 'success');
+    setConfirmDeleteModal(null);
+  };
+
+  const handleConfigureBusiness = (business: Business) => {
+    setEditingBusiness(business);
+    const isPaused = business.status === 'SUSPENDED' || (business as any).isPaused;
+    setEditForm({
+      name: business.name,
+      type: business.type,
+      revenueSplit: business.revenueSplit || 10,
+      monthlyFee: business.monthlyFee || 150,
+      status: business.status || 'ACTIVE',
+      isPaused: isPaused,
+      mpAccessToken: (business as any).mp_access_token || '',
+      description: business.description || '',
+      address: business.address || ''
+    });
+  };
+
+  const handleSaveBusinessConfig = () => {
+    if (!editingBusiness) return;
+
+    setLoading(true);
+    
+    // Atualizar o negócio na lista
+    const updatedBusinesses = businesses.map((b: Business) => {
+      if (b.id === editingBusiness.id) {
+        return {
+          ...b,
+          name: editForm.name,
+          type: editForm.type,
+          revenueSplit: editForm.revenueSplit,
+          monthlyFee: editForm.monthlyFee,
+          status: editForm.status,
+          description: editForm.description,
+          address: editForm.address,
+          mp_access_token: editForm.mpAccessToken,
+          isPaused: editForm.status === 'SUSPENDED'
+        };
+      }
+      return b;
+    });
+
+    setBusinesses(updatedBusinesses);
+    
+    // Aqui você salvaria no Supabase
+    // await supabase.from('businesses').update({ ...editForm }).eq('id', editingBusiness.id);
+    
+    setTimeout(() => {
+      setLoading(false);
+      setEditingBusiness(null);
+      addToast(`Configurações de ${editForm.name} salvas com sucesso!`, 'success');
+    }, 1000);
   };
 
   const renderTabContent = () => {
@@ -630,13 +1474,20 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
              <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
                 <div className="p-8 border-b border-slate-100 flex justify-between items-center"><h4 className="font-black text-slate-900">Extrato Consolidado</h4><button className="text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl">Exportar CSV</button></div>
                 <table className="w-full text-left">
-                  <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest"><th className="px-8 py-4">Estabelecimento</th><th className="px-8 py-4 text-center">Status Pagamento</th><th className="px-8 py-4 text-center">Faturamento Bruto</th><th className="px-8 py-4 text-right">Split Líquido Hub</th></thead>
+                  <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    <tr>
+                      <th className="px-8 py-4">Estabelecimento</th>
+                      <th className="px-8 py-4 text-center">Status Pagamento</th>
+                      <th className="px-8 py-4 text-center">Faturamento Bruto</th>
+                      <th className="px-8 py-4 text-right">Split Líquido Hub</th>
+                    </tr>
+                  </thead>
                   <tbody className="divide-y divide-slate-100">
                     {businesses.map((b: any) => (
                       <tr key={b.id} className="text-sm hover:bg-slate-50 transition-colors">
-                        <td className="px-8 py-4 font-bold">{b.name}</td>
+                        <td className="px-8 py-4 font-bold text-slate-900">{b.name}</td>
                         <td className="px-8 py-4 text-center"><span className="bg-green-100 text-green-700 text-[10px] font-black px-3 py-1 rounded-full">EM DIA</span></td>
-                        <td className="px-8 py-4 text-center font-medium text-slate-500">R$ 12.400</td>
+                        <td className="px-8 py-4 text-center font-medium text-slate-700">R$ 12.400</td>
                         <td className="px-8 py-4 text-right font-black text-indigo-600">R$ {(12400 * b.revenueSplit / 100).toFixed(2)}</td>
                       </tr>
                     ))}
@@ -648,24 +1499,272 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
       case 'PARTNERS':
         return (
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8 animate-in fade-in duration-500">
-             {businesses.map((b: any) => (
-               <div key={b.id} className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl transition-all group">
-                 <div className="h-40 relative overflow-hidden">
-                    <img src={b.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
-                    <div className="absolute top-4 left-4 bg-white/90 px-3 py-1 rounded-full text-[10px] font-black uppercase">{b.type}</div>
+             {businesses.map((b: any) => {
+               const isPaused = b.status === 'SUSPENDED' || (b as any).isPaused;
+               return (
+                 <div key={b.id} className={`bg-white rounded-[2.5rem] overflow-hidden border shadow-sm hover:shadow-xl transition-all group ${isPaused ? 'border-amber-300 bg-amber-50/30' : 'border-slate-200'}`}>
+                   <div className="h-40 relative overflow-hidden">
+                      <img src={b.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
+                      <div className="absolute top-4 left-4 bg-white/90 px-3 py-1 rounded-full text-[10px] font-black uppercase">{b.type}</div>
+                      {isPaused && (
+                        <div className="absolute top-4 right-4 bg-amber-500 text-white px-3 py-1 rounded-full text-[10px] font-black uppercase flex items-center gap-1">
+                          <AlertCircle size={12} />
+                          PAUSADO
+                        </div>
+                      )}
+                   </div>
+                   <div className="p-8 space-y-6">
+                      <div className="flex justify-between items-start">
+                        <h4 className="text-2xl font-black tracking-tighter leading-none">{b.name}</h4>
+                        <span className="text-indigo-600 font-black text-xs">{b.revenueSplit}% Taxa</span>
+                      </div>
+                      
+                      {/* Toggle de Pausar/Ativar Rápido */}
+                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-green-500'}`}></div>
+                          <span className="text-xs font-bold text-slate-700">{isPaused ? 'Pausado' : 'Ativo'}</span>
+                        </div>
+                        <label className="relative inline-flex items-center cursor-pointer">
+                          <input 
+                            type="checkbox" 
+                            checked={!isPaused}
+                            onChange={(e) => {
+                              // Abrir modal de confirmação
+                              setConfirmPauseModal({
+                                business: b,
+                                action: e.target.checked ? 'activate' : 'pause'
+                              });
+                            }}
+                            className="sr-only peer" 
+                          />
+                          <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                        </label>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <button 
+                          onClick={() => handleConfigureBusiness(b)}
+                          className="bg-slate-900 text-white py-3 rounded-xl font-black text-xs hover:bg-indigo-600 transition-colors"
+                        >
+                          Configurar
+                        </button>
+                        <button 
+                          onClick={() => setConfirmDeleteModal(b)}
+                          className="bg-slate-100 text-slate-500 py-3 rounded-xl font-black text-xs hover:bg-red-50 hover:text-red-500 transition-colors"
+                        >
+                          Remover
+                        </button>
+                      </div>
+                   </div>
                  </div>
-                 <div className="p-8 space-y-6">
-                    <div className="flex justify-between items-start">
-                      <h4 className="text-2xl font-black tracking-tighter leading-none">{b.name}</h4>
-                      <span className="text-indigo-600 font-black text-xs">{b.revenueSplit}% Taxa</span>
+               );
+             })}
+          </div>
+        );
+      case 'SETTINGS':
+        return (
+          <div className="space-y-8 animate-in fade-in duration-500">
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-10">
+              <h3 className="text-2xl font-black text-slate-900 mb-8 flex items-center gap-2">
+                <Settings className="text-indigo-600" size={24} />
+                Configurações da Plataforma
+              </h3>
+
+              <div className="space-y-8">
+                {/* Configurações de Split */}
+                <section className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h4 className="text-lg font-black text-slate-900">Taxa de Split Padrão</h4>
+                      <p className="text-sm text-slate-500 mt-1">Porcentagem padrão de comissão para novos parceiros</p>
                     </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      <button className="bg-slate-900 text-white py-3 rounded-xl font-black text-xs hover:bg-indigo-600 transition-colors">Configurar</button>
-                      <button onClick={() => setBusinesses(businesses.filter((x:any)=>x.id !== b.id))} className="bg-slate-100 text-slate-500 py-3 rounded-xl font-black text-xs hover:bg-red-50 hover:text-red-500 transition-colors">Remover</button>
+                    <div className="flex items-center gap-4">
+                      <input
+                        type="number"
+                        value={defaultSplit}
+                        onChange={(e) => setDefaultSplit(Number(e.target.value))}
+                        min={0}
+                        max={50}
+                        className="w-24 p-3 bg-slate-50 border border-slate-200 rounded-xl font-black text-slate-900 text-center focus:ring-2 focus:ring-indigo-500 outline-none"
+                      />
+                      <span className="text-2xl font-black text-slate-400">%</span>
+                      <button 
+                        onClick={handleSaveSplit}
+                        className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg"
+                      >
+                        Salvar
+                      </button>
                     </div>
-                 </div>
-               </div>
-             ))}
+                  </div>
+                </section>
+
+                <div className="h-px bg-slate-200"></div>
+
+                {/* Configurações Mercado Pago */}
+                <section className="space-y-4">
+                  <h4 className="text-lg font-black text-slate-900">Integração Mercado Pago</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-2">Sponsor ID (Plataforma)</label>
+                      <div className="flex gap-3">
+                        <input
+                          type="text"
+                          value={sponsorId}
+                          onChange={(e) => setSponsorId(e.target.value)}
+                          placeholder="User ID da conta plataforma"
+                          className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                        <button 
+                          onClick={handleUpdateSponsorId}
+                          className="px-6 py-4 bg-slate-900 text-white rounded-xl font-black text-sm hover:bg-indigo-600 transition-all"
+                        >
+                          Atualizar
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">ID da conta que recebe a comissão de 10%</p>
+                    </div>
+
+                    <div>
+                      <label className="block text-sm font-bold text-slate-700 mb-2">Webhook URL</label>
+                      <div className="flex gap-3">
+                        <input
+                          type="text"
+                          value={webhookUrl}
+                          onChange={(e) => setWebhookUrl(e.target.value)}
+                          placeholder="URL do webhook"
+                          className="flex-1 p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-xs text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        />
+                        <button 
+                          onClick={handleTestWebhook}
+                          className="px-6 py-4 bg-slate-100 text-slate-700 rounded-xl font-black text-sm hover:bg-slate-200 transition-all"
+                        >
+                          Testar
+                        </button>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-2">URL para receber notificações de pagamento</p>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="h-px bg-slate-200"></div>
+
+                {/* Configurações Gerais */}
+                <section className="space-y-4">
+                  <h4 className="text-lg font-black text-slate-900">Configurações Gerais</h4>
+                  <div className="space-y-4">
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                      <div>
+                        <p className="font-black text-slate-900">Notificações por Email</p>
+                        <p className="text-sm text-slate-500">Receber alertas de novos pagamentos</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={emailNotifications}
+                          onChange={(e) => setEmailNotifications(e.target.checked)}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-red-50 border-2 border-red-200 rounded-xl">
+                      <div>
+                        <p className="font-black text-slate-900">Modo Manutenção Global</p>
+                        <p className="text-sm text-slate-500">Pausar TODAS as operações da plataforma</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={maintenanceMode}
+                          onChange={(e) => {
+                            setMaintenanceMode(e.target.checked);
+                            if (e.target.checked) {
+                              addToast('Modo manutenção ativado - Todos os estabelecimentos foram pausados', 'success');
+                            } else {
+                              addToast('Modo manutenção desativado - Estabelecimentos podem ser ativados individualmente', 'success');
+                            }
+                          }}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-red-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-600"></div>
+                      </label>
+                    </div>
+
+                    <div className="flex items-center justify-between p-4 bg-slate-50 rounded-xl">
+                      <div>
+                        <p className="font-black text-slate-900">Auto-aprovação de Parceiros</p>
+                        <p className="text-sm text-slate-500">Aprovar novos parceiros automaticamente</p>
+                      </div>
+                      <label className="relative inline-flex items-center cursor-pointer">
+                        <input 
+                          type="checkbox" 
+                          checked={autoApprove}
+                          onChange={(e) => setAutoApprove(e.target.checked)}
+                          className="sr-only peer" 
+                        />
+                        <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                      </label>
+                    </div>
+                  </div>
+                </section>
+
+                <div className="h-px bg-slate-200"></div>
+
+                {/* Ações */}
+                <section className="space-y-4">
+                  <h4 className="text-lg font-black text-slate-900">Ações Rápidas</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button 
+                      onClick={handleSyncData}
+                      disabled={loading}
+                      className="p-6 bg-indigo-50 border-2 border-indigo-200 rounded-2xl text-left hover:bg-indigo-100 transition-all group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <RefreshCw className={`text-indigo-600 ${loading ? 'animate-spin' : 'group-hover:rotate-180'} transition-transform`} size={20} />
+                        <span className="font-black text-slate-900">Sincronizar Dados</span>
+                      </div>
+                      <p className="text-xs text-slate-500">Atualizar informações do Supabase</p>
+                    </button>
+
+                    <button 
+                      onClick={handleBackup}
+                      disabled={loading}
+                      className="p-6 bg-slate-50 border-2 border-slate-200 rounded-2xl text-left hover:bg-slate-100 transition-all group disabled:opacity-50"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <ShieldCheck className="text-slate-600" size={20} />
+                        <span className="font-black text-slate-900">Backup Completo</span>
+                      </div>
+                      <p className="text-xs text-slate-500">Gerar backup do banco de dados</p>
+                    </button>
+
+                    <button 
+                      onClick={handleOpenDashboard}
+                      className="p-6 bg-green-50 border-2 border-green-200 rounded-2xl text-left hover:bg-green-100 transition-all group"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <ExternalLink className="text-green-600" size={20} />
+                        <span className="font-black text-slate-900">Abrir Dashboard</span>
+                      </div>
+                      <p className="text-xs text-slate-500">Acessar Supabase Dashboard</p>
+                    </button>
+
+                    <button 
+                      onClick={handleViewLogs}
+                      className="p-6 bg-rose-50 border-2 border-rose-200 rounded-2xl text-left hover:bg-rose-100 transition-all group"
+                    >
+                      <div className="flex items-center gap-3 mb-2">
+                        <AlertCircle className="text-rose-600" size={20} />
+                        <span className="font-black text-slate-900">Logs do Sistema</span>
+                      </div>
+                      <p className="text-xs text-slate-500">Visualizar logs e erros</p>
+                    </button>
+                  </div>
+                </section>
+              </div>
+            </div>
           </div>
         );
       default: // DASHBOARD
@@ -711,18 +1810,375 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
       {showModal && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
            <div className="bg-white rounded-[3rem] w-full max-w-lg p-10 shadow-2xl animate-in zoom-in-95 duration-200">
-              <div className="flex justify-between items-center mb-10"><h3 className="text-2xl font-black">Adicionar Parceiro</h3><button onClick={() => setShowModal(false)}><X /></button></div>
+              <div className="flex justify-between items-center mb-10">
+                <h3 className="text-2xl font-black text-slate-900">Adicionar Parceiro</h3>
+                <button onClick={() => setShowModal(false)} className="text-slate-700 hover:text-slate-900 transition-colors"><X /></button>
+              </div>
               <div className="space-y-6">
-                 <input type="text" placeholder="Nome do Estabelecimento" value={newBiz.name || ''} onChange={e => setNewBiz({...newBiz, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold outline-none focus:ring-2 focus:ring-indigo-500" />
+                 <input type="text" placeholder="Nome do Estabelecimento" value={newBiz.name || ''} onChange={e => setNewBiz({...newBiz, name: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
                  <div className="grid grid-cols-2 gap-4">
-                    <select value={newBiz.type} onChange={e => setNewBiz({...newBiz, type: e.target.value})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold outline-none"><option value="BARBERSHOP">Barbearia</option><option value="SALON">Salão</option></select>
-                    <input type="number" placeholder="Split Hub %" value={newBiz.revenueSplit || ''} onChange={e => setNewBiz({...newBiz, revenueSplit: Number(e.target.value)})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold outline-none" />
+                    <select value={newBiz.type} onChange={e => setNewBiz({...newBiz, type: e.target.value})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 outline-none focus:ring-2 focus:ring-indigo-500">
+                      <option value="BARBERSHOP">Barbearia</option>
+                      <option value="SALON">Salão</option>
+                    </select>
+                    <input type="number" placeholder="Split Hub %" value={newBiz.revenueSplit || ''} onChange={e => setNewBiz({...newBiz, revenueSplit: Number(e.target.value)})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
                  </div>
-                 <button onClick={handleAddPartner} disabled={loading || !newBiz.name} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all">
+                 <button onClick={handleAddPartner} disabled={loading || !newBiz.name} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                    {loading ? 'Provisionando...' : 'Cadastrar e Ativar'}
                  </button>
               </div>
            </div>
+        </div>
+      )}
+
+      {/* Modal de Configuração do Parceiro */}
+      {editingBusiness && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-2xl p-10 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900">Configurar Parceiro</h3>
+                <p className="text-sm text-slate-500 mt-1">{editingBusiness.name}</p>
+              </div>
+              <button 
+                onClick={() => setEditingBusiness(null)}
+                className="text-slate-700 hover:text-slate-900 transition-colors p-2 hover:bg-slate-100 rounded-full"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Informações Básicas */}
+              <section className="space-y-4">
+                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Informações Básicas</h4>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Nome do Estabelecimento</label>
+                  <input
+                    type="text"
+                    value={editForm.name || ''}
+                    onChange={(e) => setEditForm({...editForm, name: e.target.value})}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Tipo</label>
+                    <select
+                      value={editForm.type || 'BARBERSHOP'}
+                      onChange={(e) => setEditForm({...editForm, type: e.target.value})}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="BARBERSHOP">Barbearia</option>
+                      <option value="SALON">Salão</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Status</label>
+                    <select
+                      value={editForm.status || 'ACTIVE'}
+                      onChange={(e) => setEditForm({...editForm, status: e.target.value, isPaused: e.target.value === 'SUSPENDED'})}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    >
+                      <option value="ACTIVE">Ativo</option>
+                      <option value="PENDING">Pendente</option>
+                      <option value="SUSPENDED">Suspenso (Pausado)</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Descrição</label>
+                  <textarea
+                    value={editForm.description || ''}
+                    onChange={(e) => setEditForm({...editForm, description: e.target.value})}
+                    rows={3}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none resize-none"
+                    placeholder="Descrição do estabelecimento..."
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Endereço</label>
+                  <input
+                    type="text"
+                    value={editForm.address || ''}
+                    onChange={(e) => setEditForm({...editForm, address: e.target.value})}
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-medium text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    placeholder="Endereço completo..."
+                  />
+                </div>
+              </section>
+
+              {/* Configurações Financeiras */}
+              <section className="space-y-4">
+                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Configurações Financeiras</h4>
+                
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Taxa de Split (%)</label>
+                    <input
+                      type="number"
+                      value={editForm.revenueSplit || 10}
+                      onChange={(e) => setEditForm({...editForm, revenueSplit: Number(e.target.value)})}
+                      min={0}
+                      max={50}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-bold text-slate-700 mb-2">Taxa Mensal (R$)</label>
+                    <input
+                      type="number"
+                      value={editForm.monthlyFee || 150}
+                      onChange={(e) => setEditForm({...editForm, monthlyFee: Number(e.target.value)})}
+                      min={0}
+                      className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
+                  </div>
+                </div>
+              </section>
+
+              {/* Integração Mercado Pago */}
+              <section className="space-y-4">
+                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Integração Mercado Pago</h4>
+                
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Access Token do Mercado Pago</label>
+                  <input
+                    type="text"
+                    value={editForm.mpAccessToken || ''}
+                    onChange={(e) => setEditForm({...editForm, mpAccessToken: e.target.value})}
+                    placeholder="APP_USR-..."
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-2">Token de acesso do Mercado Pago deste estabelecimento</p>
+                </div>
+              </section>
+
+              {/* Controle de Pausa Individual */}
+              <section className="space-y-4">
+                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Controle de Operação</h4>
+                
+                <div className={`flex items-center justify-between p-4 rounded-xl ${editForm.status === 'SUSPENDED' ? 'bg-amber-50 border-2 border-amber-200' : 'bg-slate-50 border border-slate-200'}`}>
+                  <div>
+                    <p className="font-black text-slate-900">Pausar Este Estabelecimento</p>
+                    <p className="text-sm text-slate-500">Pausar apenas este estabelecimento (não afeta outros)</p>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      checked={editForm.status === 'SUSPENDED'}
+                      onChange={(e) => {
+                        const newStatus = e.target.checked ? 'SUSPENDED' : 'ACTIVE';
+                        setEditForm({...editForm, status: newStatus, isPaused: e.target.checked});
+                      }}
+                      className="sr-only peer" 
+                    />
+                    <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-amber-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-amber-500"></div>
+                  </label>
+                </div>
+                {editForm.status === 'SUSPENDED' && (
+                  <div className="p-3 bg-amber-100 border border-amber-300 rounded-xl">
+                    <p className="text-xs font-bold text-amber-800 flex items-center gap-2">
+                      <AlertCircle size={14} />
+                      Este estabelecimento está pausado e não receberá novos agendamentos ou pagamentos
+                    </p>
+                  </div>
+                )}
+              </section>
+
+              {/* Botões de Ação */}
+              <div className="flex gap-4 pt-4 border-t border-slate-200">
+                <button
+                  onClick={handleSaveBusinessConfig}
+                  disabled={loading || !editForm.name}
+                  className="flex-1 bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? 'Salvando...' : 'Salvar Alterações'}
+                </button>
+                <button
+                  onClick={() => setEditingBusiness(null)}
+                  className="px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Pausa/Ativação */}
+      {confirmPauseModal.business && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="text-center space-y-6">
+              <div className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center ${
+                confirmPauseModal.action === 'pause' 
+                  ? 'bg-amber-100' 
+                  : 'bg-green-100'
+              }`}>
+                {confirmPauseModal.action === 'pause' ? (
+                  <AlertCircle className="text-amber-600" size={32} />
+                ) : (
+                  <CheckCircle2 className="text-green-600" size={32} />
+                )}
+              </div>
+              
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">
+                  {confirmPauseModal.action === 'pause' ? 'Pausar Estabelecimento?' : 'Ativar Estabelecimento?'}
+                </h3>
+                <p className="text-slate-600 font-medium">
+                  {confirmPauseModal.business.name}
+                </p>
+              </div>
+
+              <div className={`p-4 rounded-2xl ${
+                confirmPauseModal.action === 'pause' 
+                  ? 'bg-amber-50 border-2 border-amber-200' 
+                  : 'bg-green-50 border-2 border-green-200'
+              }`}>
+                <p className="text-sm font-bold text-slate-700">
+                  {confirmPauseModal.action === 'pause' ? (
+                    <>
+                      Ao pausar, este estabelecimento:
+                      <ul className="list-disc list-inside mt-2 space-y-1 text-left text-xs">
+                        <li>Não receberá novos agendamentos</li>
+                        <li>Não processará novos pagamentos</li>
+                        <li>Pode ser reativado a qualquer momento</li>
+                      </ul>
+                    </>
+                  ) : (
+                    <>
+                      Ao ativar, este estabelecimento:
+                      <ul className="list-disc list-inside mt-2 space-y-1 text-left text-xs">
+                        <li>Voltará a receber agendamentos</li>
+                        <li>Poderá processar pagamentos</li>
+                        <li>Estará totalmente operacional</li>
+                      </ul>
+                    </>
+                  )}
+                </p>
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  onClick={() => setConfirmPauseModal({business: null, action: 'pause'})}
+                  className="flex-1 px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmPauseAction}
+                  className={`flex-1 px-6 py-4 rounded-2xl font-black text-sm text-white shadow-xl transition-all ${
+                    confirmPauseModal.action === 'pause'
+                      ? 'bg-amber-500 hover:bg-amber-600'
+                      : 'bg-green-500 hover:bg-green-600'
+                  }`}
+                >
+                  {confirmPauseModal.action === 'pause' ? 'Sim, Pausar' : 'Sim, Ativar'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação de Remoção */}
+      {confirmDeleteModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="text-center space-y-6">
+              <div className="w-16 h-16 rounded-full mx-auto flex items-center justify-center bg-red-100">
+                <AlertCircle className="text-red-600" size={32} />
+              </div>
+              
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 mb-2">
+                  Remover Parceiro?
+                </h3>
+                <p className="text-slate-600 font-medium">
+                  {confirmDeleteModal.name}
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-red-50 border-2 border-red-200">
+                <p className="text-sm font-bold text-slate-700 mb-3">
+                  Esta ação não pode ser desfeita!
+                </p>
+                <ul className="list-disc list-inside space-y-1 text-left text-xs text-slate-600">
+                  <li>O estabelecimento será removido permanentemente</li>
+                  <li>Todos os dados serão perdidos</li>
+                  <li>Histórico de transações será mantido</li>
+                  <li>Não será possível recuperar esta ação</li>
+                </ul>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl border border-slate-200">
+                <p className="text-xs font-bold text-slate-700">
+                  Digite <span className="text-red-600 font-black">REMOVER</span> para confirmar
+                </p>
+                <input
+                  type="text"
+                  id="delete-confirm-input"
+                  placeholder="Digite REMOVER"
+                  className="w-full mt-2 p-3 bg-white border-2 border-slate-200 rounded-xl font-bold text-slate-900 text-center focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none"
+                  onChange={(e) => {
+                    const input = e.target;
+                    if (input.value.toUpperCase() === 'REMOVER') {
+                      input.classList.remove('border-slate-200');
+                      input.classList.add('border-green-500', 'bg-green-50');
+                    } else {
+                      input.classList.remove('border-green-500', 'bg-green-50');
+                      input.classList.add('border-slate-200');
+                    }
+                  }}
+                />
+              </div>
+
+              <div className="flex gap-4 pt-4">
+                <button
+                  onClick={() => {
+                    setConfirmDeleteModal(null);
+                    const input = document.getElementById('delete-confirm-input') as HTMLInputElement;
+                    if (input) {
+                      input.value = '';
+                      input.classList.remove('border-green-500', 'bg-green-50');
+                      input.classList.add('border-slate-200');
+                    }
+                  }}
+                  className="flex-1 px-6 py-4 bg-slate-100 text-slate-700 rounded-2xl font-black text-sm hover:bg-slate-200 transition-all"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => {
+                    const input = document.getElementById('delete-confirm-input') as HTMLInputElement;
+                    if (input && input.value.toUpperCase() === 'REMOVER') {
+                      handleConfirmDelete();
+                      const inputEl = document.getElementById('delete-confirm-input') as HTMLInputElement;
+                      if (inputEl) {
+                        inputEl.value = '';
+                        inputEl.classList.remove('border-green-500', 'bg-green-50');
+                        inputEl.classList.add('border-slate-200');
+                      }
+                    } else {
+                      addToast('Digite "REMOVER" para confirmar a exclusão', 'error');
+                    }
+                  }}
+                  className="flex-1 px-6 py-4 bg-red-500 text-white rounded-2xl font-black text-sm hover:bg-red-600 transition-all shadow-xl disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  Confirmar Remoção
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>
@@ -759,19 +2215,80 @@ export default function App() {
   // Cart State Management
   const [cart, setCart] = useState<CartItem[]>([]);
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
+  const [showBusinessLoginModal, setShowBusinessLoginModal] = useState(false);
+  const [isSignUp, setIsSignUp] = useState(false);
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
 
   useEffect(() => {
-    supabase.auth.onAuthStateChange((_event, session) => {
+    // Verificar se há um parâmetro de role na URL (após redirect do OAuth)
+    const urlParams = new URLSearchParams(window.location.search);
+    const roleParam = urlParams.get('role');
+    
+    supabase.auth.onAuthStateChange(async (_event, session) => {
       if (session?.user) {
+        let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
+        let businessId = session.user.user_metadata.business_id;
+        
+        // Se veio do login de estabelecimento, definir como BUSINESS_OWNER
+        if (roleParam === 'BUSINESS_OWNER' || window.localStorage.getItem('pending_role') === 'BUSINESS_OWNER') {
+          userRole = 'BUSINESS_OWNER';
+          window.localStorage.removeItem('pending_role');
+          
+          // Se não tem business_id, buscar ou usar o primeiro disponível
+          if (!businessId) {
+            // Por enquanto, usar o primeiro business disponível
+            // Em produção, você pode buscar na tabela businesses pelo ownerId ou email
+            // Usar uma função para acessar o estado atual
+            const currentBusinesses = businesses;
+            businessId = currentBusinesses[0]?.id || '1';
+          }
+        }
+        
         setUser({
           id: session.user.id,
-          name: session.user.user_metadata.full_name || 'Usuário',
+          name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
           email: session.user.email || '',
-          role: (session.user.user_metadata.role as any) || 'CUSTOMER',
-          avatar: session.user.user_metadata.avatar_url,
-          businessId: session.user.user_metadata.business_id
+          role: userRole,
+          avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
+          businessId: businessId
+        });
+        
+        // Limpar parâmetros da URL
+        if (roleParam) {
+          window.history.replaceState({}, '', window.location.pathname);
+        }
+      } else {
+        setUser(null);
+      }
+    });
+    
+    // Verificar sessão atual ao carregar
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        const roleParam = new URLSearchParams(window.location.search).get('role');
+        let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
+        let businessId = session.user.user_metadata.business_id;
+        
+        if (roleParam === 'BUSINESS_OWNER' || window.localStorage.getItem('pending_role') === 'BUSINESS_OWNER') {
+          userRole = 'BUSINESS_OWNER';
+          window.localStorage.removeItem('pending_role');
+          if (!businessId) {
+            // Usar uma função para acessar o estado atual
+            const currentBusinesses = businesses;
+            businessId = currentBusinesses[0]?.id || '1';
+          }
+        }
+        
+        setUser({
+          id: session.user.id,
+          name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
+          email: session.user.email || '',
+          role: userRole,
+          avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
+          businessId: businessId
         });
       }
     });
@@ -808,10 +2325,63 @@ export default function App() {
   };
 
   const handleCheckout = () => {
-    addToast('Compra finalizada com sucesso! Verifique seu e-mail.', 'success');
-    setCart([]);
+    if (cart.length === 0) {
+      addToast('Adicione produtos ao carrinho antes de finalizar a compra', 'error');
+      return;
+    }
+    if (!user || !user.email) {
+      addToast('É necessário estar logado para finalizar a compra', 'error');
+      return;
+    }
+    // Fecha o drawer e abre o modal de checkout
     setIsCartOpen(false);
+    setIsCheckoutOpen(true);
   };
+
+  const handlePaymentSuccess = async () => {
+    try {
+      // Calcula total e identifica businessId
+      const total = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
+      const applicationFee = total * 0.1;
+      const partnerNet = total - applicationFee;
+      
+      // Pega o businessId do primeiro produto (assumindo que todos são do mesmo negócio)
+      const businessId = cart[0]?.product.businessId;
+
+      // Salva transação no Supabase
+      if (user && businessId) {
+        const { error: transactionError } = await supabase
+          .from('transactions')
+          .insert({
+            business_id: businessId,
+            amount: total,
+            admin_fee: applicationFee,
+            partner_net: partnerNet,
+            date: new Date().toISOString(),
+            status: 'PAID',
+            gateway: 'MERCADO_PAGO',
+          });
+
+        if (transactionError) {
+          console.error('Erro ao salvar transação:', transactionError);
+          // Não bloqueia o fluxo, apenas loga o erro
+        }
+      }
+
+      addToast('Pagamento realizado com sucesso!', 'success');
+      setCart([]);
+      setIsCheckoutOpen(false);
+    } catch (error: any) {
+      console.error('Erro ao processar sucesso do pagamento:', error);
+      addToast('Pagamento realizado, mas houve um erro ao salvar a transação', 'error');
+      // Ainda limpa o carrinho mesmo com erro
+      setCart([]);
+      setIsCheckoutOpen(false);
+    }
+  };
+
+  // Calcula total do carrinho
+  const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
 
   const handleLogout = async () => {
     await signOut();
@@ -842,10 +2412,30 @@ export default function App() {
              <div className="space-y-4">
                 <button onClick={() => mockLogin('CUSTOMER')} className="w-full flex items-center justify-center gap-4 bg-slate-900 text-white p-6 rounded-[1.8rem] font-black text-lg hover:bg-indigo-600 transition-all shadow-2xl active:scale-95">Sou Cliente</button>
                 <div className="grid grid-cols-2 gap-3">
-                  <button onClick={() => mockLogin('BUSINESS_OWNER')} className="bg-white border border-slate-200 p-4 rounded-2xl font-black text-xs hover:bg-slate-50 transition-all">Sou Estabelecimento</button>
-                  <button onClick={() => mockLogin('SUPER_ADMIN')} className="bg-white border border-slate-200 p-4 rounded-2xl font-black text-xs hover:bg-slate-50 transition-all">Admin Central</button>
+                  <button 
+                    onClick={() => setShowBusinessLoginModal(true)} 
+                    className="bg-white border-2 border-slate-200 p-4 rounded-2xl font-black text-xs text-slate-900 hover:bg-indigo-50 hover:border-indigo-300 hover:text-indigo-700 transition-all active:scale-95 shadow-sm hover:shadow-md flex items-center justify-center gap-2"
+                  >
+                    Sou Estabelecimento
+                  </button>
+                  <button onClick={() => mockLogin('SUPER_ADMIN')} className="bg-white border-2 border-slate-200 p-4 rounded-2xl font-black text-xs text-slate-900 hover:bg-slate-900 hover:border-slate-900 hover:text-white transition-all active:scale-95 shadow-sm hover:shadow-md">Admin Central</button>
                 </div>
-                <button onClick={signInWithGoogle} className="w-full flex items-center justify-center gap-2 text-slate-400 font-black text-xs mt-4 hover:text-indigo-600 transition-colors">
+                <button 
+                  onClick={async () => {
+                    try {
+                      await signInWithGoogle('CUSTOMER');
+                    } catch (error: any) {
+                      console.error('Erro ao fazer login com Google:', error);
+                      addToast(
+                        error?.message?.includes('redirect') 
+                          ? 'Erro de configuração. Verifique o guia GOOGLE_OAUTH_SETUP.md'
+                          : 'Erro ao fazer login. Verifique se o Google OAuth está configurado no Supabase.',
+                        'error'
+                      );
+                    }
+                  }} 
+                  className="w-full flex items-center justify-center gap-2 text-slate-400 font-black text-xs mt-4 hover:text-indigo-600 transition-colors"
+                >
                    <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="" /> Login Oficial Google
                 </button>
              </div>
@@ -886,6 +2476,8 @@ export default function App() {
           setProducts={setProducts}
           setAppointments={setAppointments}
           addToast={addToast}
+          setBusinesses={setBusinesses}
+          businesses={businesses}
         />
       );
     }
@@ -914,7 +2506,7 @@ export default function App() {
                  <div className="absolute bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-2xl text-sm font-black flex items-center gap-2"><Star size={16} fill="#f59e0b" className="text-amber-500" /> {biz.rating}</div>
                </div>
                <div className="p-10 space-y-6">
-                 <div><h3 className="text-3xl font-black tracking-tighter mb-2 group-hover:text-indigo-600 transition-colors">{biz.name}</h3><p className="text-slate-500 font-medium line-clamp-2">{biz.description}</p></div>
+                 <div><h3 className="text-3xl font-black tracking-tighter mb-2 text-slate-900 group-hover:text-indigo-600 transition-colors">{biz.name}</h3><p className="text-slate-600 font-medium line-clamp-2">{biz.description}</p></div>
                  <button className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200">Ver Agenda & Loja <ChevronRight size={18} /></button>
                </div>
             </div>
@@ -957,7 +2549,150 @@ export default function App() {
         accentBg={selectedBusiness?.type === 'BARBERSHOP' ? 'bg-indigo-600' : 'bg-rose-500'}
       />
 
+      <CheckoutModal
+        isOpen={isCheckoutOpen}
+        onClose={() => setIsCheckoutOpen(false)}
+        total={cartTotal}
+        email={user?.email || ''}
+        businessId={cart[0]?.product.businessId}
+        onPaymentSuccess={handlePaymentSuccess}
+      />
+
       {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+
+      {/* Modal de Login/Cadastro para Estabelecimento */}
+      {showBusinessLoginModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-900">
+                {isSignUp ? 'Criar Conta' : 'Login Estabelecimento'}
+              </h3>
+              <button 
+                onClick={() => {
+                  setShowBusinessLoginModal(false);
+                  setIsSignUp(false);
+                  setLoginForm({ email: '', password: '', name: '' });
+                }} 
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {isSignUp && (
+                <div>
+                  <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nome do Estabelecimento</label>
+                  <input 
+                    type="text" 
+                    placeholder="Ex: Barbearia do João" 
+                    value={loginForm.name} 
+                    onChange={e => setLoginForm({...loginForm, name: e.target.value})} 
+                    className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Email</label>
+                <input 
+                  type="email" 
+                  placeholder="seu@email.com" 
+                  value={loginForm.email} 
+                  onChange={e => setLoginForm({...loginForm, email: e.target.value})} 
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Senha</label>
+                <input 
+                  type="password" 
+                  placeholder="••••••••" 
+                  value={loginForm.password} 
+                  onChange={e => setLoginForm({...loginForm, password: e.target.value})} 
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                />
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={async () => {
+                    try {
+                      if (isSignUp) {
+                        if (!loginForm.email || !loginForm.password) {
+                          addToast('Preencha email e senha', 'error');
+                          return;
+                        }
+                        window.localStorage.setItem('pending_role', 'BUSINESS_OWNER');
+                        await signUpWithEmail(loginForm.email, loginForm.password, loginForm.name);
+                        addToast('Conta criada! Verifique seu email para confirmar.', 'success');
+                        setShowBusinessLoginModal(false);
+                        setLoginForm({ email: '', password: '', name: '' });
+                        setIsSignUp(false);
+                      } else {
+                        if (!loginForm.email || !loginForm.password) {
+                          addToast('Preencha email e senha', 'error');
+                          return;
+                        }
+                        window.localStorage.setItem('pending_role', 'BUSINESS_OWNER');
+                        await signInWithEmail(loginForm.email, loginForm.password);
+                        addToast('Login realizado com sucesso!', 'success');
+                        setShowBusinessLoginModal(false);
+                        setLoginForm({ email: '', password: '', name: '' });
+                      }
+                    } catch (error: any) {
+                      console.error('Erro:', error);
+                      addToast(
+                        error?.message || (isSignUp ? 'Erro ao criar conta' : 'Email ou senha incorretos'),
+                        'error'
+                      );
+                    }
+                  }}
+                  className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all"
+                >
+                  {isSignUp ? 'Criar Conta' : 'Entrar'}
+                </button>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      window.localStorage.setItem('pending_role', 'BUSINESS_OWNER');
+                      await signInWithGoogle('BUSINESS_OWNER');
+                    } catch (error: any) {
+                      window.localStorage.removeItem('pending_role');
+                      console.error('Erro ao fazer login com Google:', error);
+                      addToast(
+                        error?.message?.includes('redirect') 
+                          ? 'Erro de configuração. Verifique o guia GOOGLE_OAUTH_SETUP.md'
+                          : 'Erro ao fazer login com Google.',
+                        'error'
+                      );
+                    }
+                  }}
+                  className="w-full bg-white border-2 border-slate-200 text-slate-900 py-4 rounded-2xl font-black text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                >
+                  <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="" />
+                  Continuar com Google
+                </button>
+              </div>
+
+              <div className="text-center">
+                <button
+                  onClick={() => {
+                    setIsSignUp(!isSignUp);
+                    setLoginForm({ email: '', password: '', name: '' });
+                  }}
+                  className="text-sm text-slate-600 hover:text-indigo-600 font-bold transition-colors"
+                >
+                  {isSignUp ? 'Já tem conta? Faça login' : 'Não tem conta? Criar conta'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

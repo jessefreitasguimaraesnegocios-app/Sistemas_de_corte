@@ -1,11 +1,23 @@
 
 import { GoogleGenAI } from "@google/genai";
 
-// Always use the named parameter and direct process.env.API_KEY access
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization - only create when needed and API key is available
+const getAI = () => {
+  const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+  if (!apiKey) {
+    return null;
+  }
+  return new GoogleGenAI({ apiKey });
+};
 
 export const generateBusinessDescription = async (name: string, type: string) => {
   try {
+    const ai = getAI();
+    if (!ai) {
+      // Return default description if API key is not available
+      return "Qualidade e sofisticação em cada detalhe.";
+    }
+    
     // Basic Text Tasks (e.g., summarization, proofreading, and simple Q&A): 'gemini-3-flash-preview'
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',

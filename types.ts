@@ -75,3 +75,40 @@ export interface Transaction {
   status: 'PAID' | 'PENDING' | 'REFUNDED';
   gateway: PaymentGateway;
 }
+
+// Payment Types
+export type PaymentMethod = 'pix' | 'credit_card';
+
+export interface PaymentRequest {
+  valor: number;
+  metodo_pagamento: PaymentMethod;
+  email_cliente: string;
+  referencia_externa?: string;
+  token_cartao?: string;
+  business_id?: string;
+}
+
+export interface PixPaymentResponse {
+  success: boolean;
+  qr_code_base64?: string;
+  qr_code?: string;
+  txid: string;
+  payment_id: number;
+  status: string;
+  application_fee: number;
+  error?: string;
+  details?: any;
+}
+
+export interface CreditCardPaymentResponse {
+  success: boolean;
+  payment_id: number;
+  status: string;
+  status_detail: string;
+  application_fee: number;
+  transaction_amount: number;
+  error?: string;
+  details?: any;
+}
+
+export type PaymentResponse = PixPaymentResponse | CreditCardPaymentResponse;
