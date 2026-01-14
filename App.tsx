@@ -3438,6 +3438,23 @@ export default function App() {
     };
   }, [fetchBusinesses]);
 
+  // Buscar dados quando um business é selecionado
+  useEffect(() => {
+    if (selectedBusiness?.id) {
+      const loadBusinessData = async () => {
+        const [prods, collabs, servs] = await Promise.all([
+          fetchProductsForBusiness(selectedBusiness.id),
+          fetchCollaboratorsForBusiness(selectedBusiness.id),
+          fetchServicesForBusiness(selectedBusiness.id),
+        ]);
+        setProducts(prods);
+        setCollaborators(collabs);
+        setServices(servs);
+      };
+      loadBusinessData();
+    }
+  }, [selectedBusiness?.id, fetchProductsForBusiness, fetchCollaboratorsForBusiness, fetchServicesForBusiness]);
+
   useEffect(() => {
     // Verificar se há um parâmetro de role na URL (após redirect do OAuth)
     const urlParams = new URLSearchParams(window.location.search);
@@ -3888,6 +3905,23 @@ export default function App() {
         </div>
       );
     }
+
+    // Buscar dados quando um business é selecionado
+    useEffect(() => {
+      if (selectedBusiness?.id) {
+        const loadBusinessData = async () => {
+          const [prods, collabs, servs] = await Promise.all([
+            fetchProductsForBusiness(selectedBusiness.id),
+            fetchCollaboratorsForBusiness(selectedBusiness.id),
+            fetchServicesForBusiness(selectedBusiness.id),
+          ]);
+          setProducts(prods);
+          setCollaborators(collabs);
+          setServices(servs);
+        };
+        loadBusinessData();
+      }
+    }, [selectedBusiness?.id, fetchProductsForBusiness, fetchCollaboratorsForBusiness, fetchServicesForBusiness]);
 
     // Buscar dados quando um business é selecionado
     useEffect(() => {
