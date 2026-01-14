@@ -2990,7 +2990,7 @@ export default function App() {
     });
     
     // Verificar sessão atual ao carregar
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
       if (session?.user) {
         const roleParam = new URLSearchParams(window.location.search).get('role');
         let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
