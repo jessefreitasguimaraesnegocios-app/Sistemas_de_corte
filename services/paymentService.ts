@@ -44,6 +44,19 @@ export async function criarPagamentoPix(
   businessId?: string
 ): Promise<PixPaymentResponse> {
   try {
+    // Validação de parâmetros obrigatórios
+    if (!businessId) {
+      throw new Error('ID do estabelecimento é obrigatório para processar o pagamento');
+    }
+
+    if (!email || !email.includes('@')) {
+      throw new Error('Email inválido');
+    }
+
+    if (!valor || valor <= 0) {
+      throw new Error('Valor inválido. O valor deve ser maior que zero.');
+    }
+
     const { data, error } = await supabase.functions.invoke('createPayment', {
       body: {
         valor,
@@ -55,11 +68,17 @@ export async function criarPagamentoPix(
     });
 
     if (error) {
+      console.error('Erro na Edge Function:', error);
       throw new Error(error.message || 'Erro ao criar pagamento PIX');
     }
 
-    if (!data.success) {
+    // Verificar se a resposta contém erro (mesmo com status 200)
+    if (data && data.error) {
       throw new Error(data.error || 'Falha ao processar pagamento PIX');
+    }
+
+    if (!data || !data.success) {
+      throw new Error(data?.error || 'Falha ao processar pagamento PIX');
     }
 
     return data as PixPaymentResponse;

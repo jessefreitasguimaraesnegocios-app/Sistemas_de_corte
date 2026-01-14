@@ -3773,6 +3773,13 @@ export default function App() {
       addToast('É necessário estar logado para finalizar a compra', 'error');
       return;
     }
+    // Verificar se há businessId válido
+    const businessId = cart[0]?.product.businessId;
+    if (!businessId) {
+      addToast('Erro: Produto sem estabelecimento associado. Recarregue a página.', 'error');
+      console.error('Produto no carrinho sem businessId:', cart[0]?.product);
+      return;
+    }
     // Fecha o drawer e abre o modal de checkout
     setIsCartOpen(false);
     setIsCheckoutOpen(true);

@@ -40,10 +40,49 @@ serve(async (req: Request) => {
       business_id,
     } = body;
 
-    // Validação de parâmetros obrigatórios
-    if (!valor || !metodo_pagamento || !email_cliente || !business_id) {
+    // Log para debug (remover em produção se necessário)
+    console.log("Recebido na Edge Function:", {
+      valor,
+      metodo_pagamento,
+      email_cliente,
+      business_id,
+      has_token_cartao: !!token_cartao,
+    });
+
+    // Validação de parâmetros obrigatórios com mensagens específicas
+    if (!valor || valor <= 0) {
       return new Response(
-        JSON.stringify({ error: "Parâmetros obrigatórios ausentes: valor, metodo_pagamento, email_cliente e business_id são obrigatórios" }),
+        JSON.stringify({ error: "Valor inválido. O valor deve ser maior que zero." }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    if (!metodo_pagamento) {
+      return new Response(
+        JSON.stringify({ error: "Método de pagamento não especificado. Use 'pix' ou 'credit_card'." }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    if (!email_cliente || !email_cliente.includes('@')) {
+      return new Response(
+        JSON.stringify({ error: "Email do cliente inválido ou não fornecido." }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    if (!business_id) {
+      return new Response(
+        JSON.stringify({ error: "ID do estabelecimento (business_id) é obrigatório e não foi fornecido." }),
         { 
           status: 400, 
           headers: { ...corsHeaders, "Content-Type": "application/json" } 

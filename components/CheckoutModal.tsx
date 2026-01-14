@@ -115,7 +115,8 @@ export default function CheckoutModal({
     }
 
     if (!businessId) {
-      setError('ID do estabelecimento não encontrado. Por favor, recarregue a página.');
+      setError('ID do estabelecimento não encontrado. Por favor, recarregue a página e tente novamente.');
+      console.error('businessId não fornecido ao CheckoutModal');
       return;
     }
 
@@ -129,13 +130,18 @@ export default function CheckoutModal({
     setPaymentStatus(null);
 
     try {
+      console.log('Criando pagamento PIX:', { total, email, businessId });
       const response = await criarPagamentoPix(total, email, businessId);
+      
+      console.log('Resposta do pagamento PIX:', response);
       
       if (response.success && (response.qr_code_base64 || response.qr_code)) {
         setPixData(response);
         setPaymentStatus('pending');
       } else {
-        setError(response.error || 'Erro ao gerar QR Code PIX. Verifique as configurações do Mercado Pago.');
+        const errorMsg = response.error || 'Erro ao gerar QR Code PIX. Verifique as configurações do Mercado Pago.';
+        console.error('Erro na resposta do pagamento:', errorMsg);
+        setError(errorMsg);
       }
     } catch (err: any) {
       console.error('Erro ao criar pagamento PIX:', err);
