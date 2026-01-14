@@ -1,4 +1,8 @@
+// Deno Edge Function - runs in Deno runtime
+/// <reference path="./deno.d.ts" />
+// @ts-ignore - Deno imports are resolved at runtime
 import { serve } from "https://deno.land/x/sift/mod.ts";
+// @ts-ignore - ESM imports are resolved at runtime
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || 
