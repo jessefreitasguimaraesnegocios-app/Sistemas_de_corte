@@ -287,6 +287,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
           duration: s.duration,
         }));
         setServices(servicesData);
+      } else {
+        setServices([]);
       }
     } catch (error) {
       console.error('Erro ao buscar serviços:', error);
@@ -295,56 +297,201 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     }
   }, [business?.id, setServices]);
 
+  // Buscar produtos do banco de dados
+  const fetchProducts = useCallback(async () => {
+    if (!business?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('business_id', business.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar produtos:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const productsData: Product[] = data.map((p: any) => ({
+          id: p.id,
+          businessId: p.business_id,
+          name: p.name,
+          price: Number(p.price),
+          stock: p.stock,
+          image: p.image,
+          category: p.category,
+        }));
+        setProducts(productsData);
+      } else {
+        setProducts([]);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar produtos:', error);
+    }
+  }, [business?.id, setProducts]);
+
+  // Buscar colaboradores do banco de dados
+  const fetchCollaborators = useCallback(async () => {
+    if (!business?.id) return;
+    try {
+      const { data, error } = await supabase
+        .from('collaborators')
+        .select('*')
+        .eq('business_id', business.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar colaboradores:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const collaboratorsData: Collaborator[] = data.map((c: any) => ({
+          id: c.id,
+          businessId: c.business_id,
+          name: c.name,
+          role: c.role,
+          avatar: c.avatar,
+          rating: Number(c.rating),
+        }));
+        setCollaborators(collaboratorsData);
+      } else {
+        setCollaborators([]);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar colaboradores:', error);
+    }
+  }, [business?.id, setCollaborators]);
+
   useEffect(() => {
     fetchServices();
-  }, [fetchServices]);
+    fetchProducts();
+    fetchCollaborators();
+  }, [fetchServices, fetchProducts, fetchCollaborators]);
 
   const handleAddItem = async () => {
     if (showModal === 'PRODUCT') {
       if (editingItem && editingItem._type === 'product') {
         // Editar produto existente
-        const updated = products.map((p: any) => 
-          p.id === editingItem.id 
-            ? { ...p, name: newItem.name, price: Number(newItem.price), stock: Number(newItem.stock), category: newItem.category || 'Geral', image: newItem.image || p.image }
-            : p
-        );
-        setProducts(updated);
-        addToast('Produto atualizado!', 'success');
+        try {
+          const { error } = await supabase
+            .from('products')
+            .update({
+              name: newItem.name,
+              price: Number(newItem.price),
+              stock: Number(newItem.stock),
+              category: newItem.category || 'Geral',
+              image: newItem.image || editingItem.image,
+            })
+            .eq('id', editingItem.id);
+
+          if (error) throw error;
+
+          const updated = products.map((p: any) => 
+            p.id === editingItem.id 
+              ? { ...p, name: newItem.name, price: Number(newItem.price), stock: Number(newItem.stock), category: newItem.category || 'Geral', image: newItem.image || p.image }
+              : p
+          );
+          setProducts(updated);
+          addToast('Produto atualizado!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao atualizar produto:', error);
+          addToast('Erro ao atualizar produto. Tente novamente.', 'error');
+        }
       } else {
         // Adicionar novo produto
-        const prod: Product = { 
-          ...newItem, 
-          id: Math.random().toString(), 
-          businessId: business.id, 
-          price: Number(newItem.price), 
-          stock: Number(newItem.stock), 
-          image: newItem.image || 'https://picsum.photos/seed/prod/400/400', 
-          category: newItem.category || 'Geral' 
-        };
-        setProducts([...products, prod]);
-        addToast('Produto adicionado ao estoque!', 'success');
+        try {
+          const { data, error } = await supabase
+            .from('products')
+            .insert({
+              business_id: business.id,
+              name: newItem.name,
+              price: Number(newItem.price),
+              stock: Number(newItem.stock),
+              image: newItem.image || 'https://picsum.photos/seed/prod/400/400',
+              category: newItem.category || 'Geral',
+              is_active: true,
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          const prod: Product = {
+            id: data.id,
+            businessId: data.business_id,
+            name: data.name,
+            price: Number(data.price),
+            stock: data.stock,
+            image: data.image,
+            category: data.category,
+          };
+          setProducts([...products, prod]);
+          addToast('Produto adicionado ao estoque!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao criar produto:', error);
+          addToast('Erro ao cadastrar produto. Tente novamente.', 'error');
+        }
       }
     } else if (showModal === 'TEAM') {
       if (editingItem && editingItem._type === 'collaborator') {
         // Editar colaborador existente
-        const updated = collaborators.map((c: any) => 
-          c.id === editingItem.id 
-            ? { ...c, name: newItem.name, role: newItem.role, avatar: newItem.avatar || c.avatar }
-            : c
-        );
-        setCollaborators(updated);
-        addToast('Profissional atualizado!', 'success');
+        try {
+          const { error } = await supabase
+            .from('collaborators')
+            .update({
+              name: newItem.name,
+              role: newItem.role,
+              avatar: newItem.avatar || editingItem.avatar,
+            })
+            .eq('id', editingItem.id);
+
+          if (error) throw error;
+
+          const updated = collaborators.map((c: any) => 
+            c.id === editingItem.id 
+              ? { ...c, name: newItem.name, role: newItem.role, avatar: newItem.avatar || c.avatar }
+              : c
+          );
+          setCollaborators(updated);
+          addToast('Profissional atualizado!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao atualizar colaborador:', error);
+          addToast('Erro ao atualizar profissional. Tente novamente.', 'error');
+        }
       } else {
         // Adicionar novo colaborador
-        const pro: Collaborator = { 
-          ...newItem, 
-          id: Math.random().toString(), 
-          businessId: business.id, 
-          rating: 5.0, 
-          avatar: newItem.avatar || `https://i.pravatar.cc/150?u=${Math.random()}` 
-        };
-        setCollaborators([...collaborators, pro]);
-        addToast('Novo profissional cadastrado!', 'success');
+        try {
+          const { data, error } = await supabase
+            .from('collaborators')
+            .insert({
+              business_id: business.id,
+              name: newItem.name,
+              role: newItem.role,
+              avatar: newItem.avatar || `https://i.pravatar.cc/150?u=${Math.random()}`,
+              rating: 5.0,
+              status: 'ACTIVE',
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          const pro: Collaborator = {
+            id: data.id,
+            businessId: data.business_id,
+            name: data.name,
+            role: data.role,
+            avatar: data.avatar,
+            rating: Number(data.rating),
+          };
+          setCollaborators([...collaborators, pro]);
+          addToast('Novo profissional cadastrado!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao criar colaborador:', error);
+          addToast('Erro ao cadastrar profissional. Tente novamente.', 'error');
+        }
       }
     } else if (showModal === 'SERVICE') {
       if (editingItem && editingItem._type === 'service') {
@@ -431,11 +578,35 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     const { type, id, name } = confirmDeleteModal;
 
     if (type === 'product') {
-      setProducts(products.filter((p: any) => p.id !== id));
-      addToast(`Produto "${name}" removido.`, 'success');
+      try {
+        const { error } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        setProducts(products.filter((p: any) => p.id !== id));
+        addToast(`Produto "${name}" removido.`, 'success');
+      } catch (error: any) {
+        console.error('Erro ao deletar produto:', error);
+        addToast('Erro ao remover produto. Tente novamente.', 'error');
+      }
     } else if (type === 'collaborator') {
-      setCollaborators(collaborators.filter((c: any) => c.id !== id));
-      addToast(`Profissional "${name}" removido.`, 'success');
+      try {
+        const { error } = await supabase
+          .from('collaborators')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        setCollaborators(collaborators.filter((c: any) => c.id !== id));
+        addToast(`Profissional "${name}" removido.`, 'success');
+      } catch (error: any) {
+        console.error('Erro ao deletar colaborador:', error);
+        addToast('Erro ao remover profissional. Tente novamente.', 'error');
+      }
     } else if (type === 'service') {
       try {
         const { error } = await supabase
@@ -3070,9 +3241,10 @@ export default function App() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [businesses, setBusinesses] = useState<Business[]>([]);
   const [userBusiness, setUserBusiness] = useState<Business | null>(null);
-  const [collaborators, setCollaborators] = useState<Collaborator[]>(INITIAL_COLLABORATORS);
-  const [services, setServices] = useState<Service[]>(INITIAL_SERVICES);
-  const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [services, setServices] = useState<Service[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loadingBusinesses, setLoadingBusinesses] = useState(true);
   const [businessLoadTimeout, setBusinessLoadTimeout] = useState(false);
@@ -3086,6 +3258,102 @@ export default function App() {
   const [showBusinessLoginModal, setShowBusinessLoginModal] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
+
+  // Função para buscar produtos de um business específico
+  const fetchProductsForBusiness = useCallback(async (businessId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar produtos:', error);
+        return [];
+      }
+
+      if (data && data.length > 0) {
+        return data.map((p: any) => ({
+          id: p.id,
+          businessId: p.business_id,
+          name: p.name,
+          price: Number(p.price),
+          stock: p.stock,
+          image: p.image,
+          category: p.category,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Erro ao buscar produtos:', error);
+      return [];
+    }
+  }, []);
+
+  // Função para buscar colaboradores de um business específico
+  const fetchCollaboratorsForBusiness = useCallback(async (businessId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('collaborators')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('status', 'ACTIVE')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar colaboradores:', error);
+        return [];
+      }
+
+      if (data && data.length > 0) {
+        return data.map((c: any) => ({
+          id: c.id,
+          businessId: c.business_id,
+          name: c.name,
+          role: c.role,
+          avatar: c.avatar,
+          rating: Number(c.rating),
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Erro ao buscar colaboradores:', error);
+      return [];
+    }
+  }, []);
+
+  // Função para buscar serviços de um business específico
+  const fetchServicesForBusiness = useCallback(async (businessId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .eq('business_id', businessId)
+        .eq('is_active', true)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar serviços:', error);
+        return [];
+      }
+
+      if (data && data.length > 0) {
+        return data.map((s: any) => ({
+          id: s.id,
+          businessId: s.business_id,
+          name: s.name,
+          price: Number(s.price),
+          duration: s.duration,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Erro ao buscar serviços:', error);
+      return [];
+    }
+  }, []);
 
   // Função para buscar businesses do banco de dados
   const fetchBusinesses = useCallback(async () => {
@@ -3621,13 +3889,30 @@ export default function App() {
       );
     }
 
+    // Buscar dados quando um business é selecionado
+    useEffect(() => {
+      if (selectedBusiness?.id) {
+        const loadBusinessData = async () => {
+          const [prods, collabs, servs] = await Promise.all([
+            fetchProductsForBusiness(selectedBusiness.id),
+            fetchCollaboratorsForBusiness(selectedBusiness.id),
+            fetchServicesForBusiness(selectedBusiness.id),
+          ]);
+          setProducts(prods);
+          setCollaborators(collabs);
+          setServices(servs);
+        };
+        loadBusinessData();
+      }
+    }, [selectedBusiness?.id, fetchProductsForBusiness, fetchCollaboratorsForBusiness, fetchServicesForBusiness]);
+
     if (selectedBusiness) {
       return (
         <BusinessDetailView 
           business={selectedBusiness} 
-          collaborators={collaborators} 
-          services={services} 
-          products={products} 
+          collaborators={collaborators.filter((c: any) => c.businessId === selectedBusiness.id)} 
+          services={services.filter((s: any) => s.businessId === selectedBusiness.id)} 
+          products={products.filter((p: any) => p.businessId === selectedBusiness.id)} 
           appointments={appointments}
           setAppointments={setAppointments}
           onBack={() => setSelectedBusiness(null)}

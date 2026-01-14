@@ -17,6 +17,8 @@ Execute as migrações na seguinte ordem:
 9. **009_create_user_profiles.sql** - Tabela de perfis de usuários ⭐ NOVO
 10. **010_allow_super_admin_create_businesses.sql** - Permite que SUPER_ADMIN crie businesses ⭐ NOVO
 11. **011_create_services_table.sql** - Tabela de serviços oferecidos pelos estabelecimentos ⭐ NOVO
+12. **012_create_products_table.sql** - Tabela de produtos da loja ⭐ NOVO
+13. **013_create_collaborators_table.sql** - Tabela de colaboradores/funcionários ⭐ NOVO
 
 ## Como Aplicar as Migrações
 
@@ -64,6 +66,8 @@ psql -h db.seu-projeto.supabase.co -U postgres -d postgres
 \i supabase/migrations/009_create_user_profiles.sql
 \i supabase/migrations/010_allow_super_admin_create_businesses.sql
 \i supabase/migrations/011_create_services_table.sql
+\i supabase/migrations/012_create_products_table.sql
+\i supabase/migrations/013_create_collaborators_table.sql
 ```
 
 ## Estrutura das Tabelas
