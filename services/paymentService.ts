@@ -60,107 +60,59 @@ export async function criarPagamentoPix(
     let responseData: any = null;
     let responseError: any = null;
     
+    // Usar fetch direto para garantir que capturamos o body do erro corretamente
     try {
-      const result = await supabase.functions.invoke('createPayment', {
-        body: {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({
           valor,
           metodo_pagamento: 'pix',
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        } as PaymentRequest,
+        }),
       });
       
-      responseData = result.data;
-      responseError = result.error;
-    } catch (invokeError: any) {
-      // Capturar erro de invocação (pode ocorrer quando status não é 2xx)
-      console.error('Erro ao invocar Edge Function:', invokeError);
-      console.error('Tipo do erro:', invokeError?.constructor?.name);
-      console.error('Propriedades do erro:', Object.keys(invokeError || {}));
-      console.error('Erro completo:', JSON.stringify(invokeError, null, 2));
-      
-      responseError = invokeError;
-      
-      // Tentar múltiplas formas de extrair o body da resposta
-      // 1. Tentar context.json() se for um Response object
-      if (invokeError?.context) {
-        try {
-          if (typeof invokeError.context.json === 'function') {
-            responseData = await invokeError.context.json();
-            console.log('✅ Body extraído via context.json():', responseData);
-          } else if (typeof invokeError.context.text === 'function') {
-            const text = await invokeError.context.text();
-            if (text) {
-              responseData = JSON.parse(text);
-              console.log('✅ Body extraído via context.text():', responseData);
-            }
-          } else if (invokeError.context.body) {
-            // Tentar ler do body diretamente
-            const reader = invokeError.context.body.getReader();
-            const { value } = await reader.read();
-            if (value) {
-              const decoder = new TextDecoder();
-              const text = decoder.decode(value);
-              responseData = JSON.parse(text);
-              console.log('✅ Body extraído via body.getReader():', responseData);
-            }
+      // Tentar parsear a resposta como JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await response.json();
+      } else {
+        const text = await response.text();
+        if (text) {
+          try {
+            responseData = JSON.parse(text);
+          } catch (e) {
+            responseData = { error: text };
           }
-        } catch (e) {
-          console.warn('⚠️ Erro ao extrair body via context:', e);
         }
       }
       
-      // 2. Tentar data diretamente
-      if (!responseData && invokeError?.data) {
-        responseData = invokeError.data;
-        console.log('✅ Body extraído via error.data:', responseData);
+      if (!response.ok) {
+        responseError = new Error(responseData?.error || `HTTP ${response.status}: ${response.statusText}`);
+        console.error('❌ Erro HTTP da Edge Function:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: responseData
+        });
       }
-      
-      // 3. Tentar message se contiver JSON
-      if (!responseData && invokeError?.message) {
-        try {
-          const parsed = JSON.parse(invokeError.message);
-          responseData = parsed;
-          console.log('✅ Body extraído via message JSON:', responseData);
-        } catch (e) {
-          // Não é JSON, ignorar
-        }
-      }
-      
-      // 4. Se ainda não tem data, fazer fetch direto para obter o erro
-      if (!responseData) {
-        try {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          
-          const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
-              'apikey': supabaseAnonKey,
-            },
-            body: JSON.stringify({
-              valor,
-              metodo_pagamento: 'pix',
-              email_cliente: email,
-              business_id: businessId,
-              referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            }),
-          });
-          
-          if (!response.ok) {
-            const errorBody = await response.json();
-            responseData = errorBody;
-            console.log('✅ Body extraído via fetch direto:', responseData);
-          }
-        } catch (fetchError) {
-          console.warn('⚠️ Erro ao fazer fetch direto:', fetchError);
-        }
-      }
+    } catch (fetchError: any) {
+      console.error('❌ Erro ao fazer fetch para Edge Function:', fetchError);
+      responseError = fetchError;
+      responseData = { 
+        error: fetchError.message || 'Erro ao conectar com o servidor',
+        details: fetchError.toString()
+      };
     }
 
     // Se há erro, tentar extrair mensagem detalhada
@@ -250,109 +202,60 @@ export async function criarPagamentoCartao(
     let responseData: any = null;
     let responseError: any = null;
     
+    // Usar fetch direto para garantir que capturamos o body do erro corretamente
     try {
-      const result = await supabase.functions.invoke('createPayment', {
-        body: {
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+      const { data: sessionData } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+      
+      const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({
           valor,
           metodo_pagamento: 'credit_card',
           email_cliente: email,
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        } as PaymentRequest,
+        }),
       });
       
-      responseData = result.data;
-      responseError = result.error;
-    } catch (invokeError: any) {
-      // Capturar erro de invocação (pode ocorrer quando status não é 2xx)
-      console.error('Erro ao invocar Edge Function:', invokeError);
-      console.error('Tipo do erro:', invokeError?.constructor?.name);
-      console.error('Propriedades do erro:', Object.keys(invokeError || {}));
-      console.error('Erro completo:', JSON.stringify(invokeError, null, 2));
-      
-      responseError = invokeError;
-      
-      // Tentar múltiplas formas de extrair o body da resposta
-      // 1. Tentar context.json() se for um Response object
-      if (invokeError?.context) {
-        try {
-          if (typeof invokeError.context.json === 'function') {
-            responseData = await invokeError.context.json();
-            console.log('✅ Body extraído via context.json():', responseData);
-          } else if (typeof invokeError.context.text === 'function') {
-            const text = await invokeError.context.text();
-            if (text) {
-              responseData = JSON.parse(text);
-              console.log('✅ Body extraído via context.text():', responseData);
-            }
-          } else if (invokeError.context.body) {
-            // Tentar ler do body diretamente
-            const reader = invokeError.context.body.getReader();
-            const { value } = await reader.read();
-            if (value) {
-              const decoder = new TextDecoder();
-              const text = decoder.decode(value);
-              responseData = JSON.parse(text);
-              console.log('✅ Body extraído via body.getReader():', responseData);
-            }
+      // Tentar parsear a resposta como JSON
+      const contentType = response.headers.get('content-type');
+      if (contentType && contentType.includes('application/json')) {
+        responseData = await response.json();
+      } else {
+        const text = await response.text();
+        if (text) {
+          try {
+            responseData = JSON.parse(text);
+          } catch (e) {
+            responseData = { error: text };
           }
-        } catch (e) {
-          console.warn('⚠️ Erro ao extrair body via context:', e);
         }
       }
       
-      // 2. Tentar data diretamente
-      if (!responseData && invokeError?.data) {
-        responseData = invokeError.data;
-        console.log('✅ Body extraído via error.data:', responseData);
+      if (!response.ok) {
+        responseError = new Error(responseData?.error || `HTTP ${response.status}: ${response.statusText}`);
+        console.error('❌ Erro HTTP da Edge Function:', {
+          status: response.status,
+          statusText: response.statusText,
+          body: responseData
+        });
       }
-      
-      // 3. Tentar message se contiver JSON
-      if (!responseData && invokeError?.message) {
-        try {
-          const parsed = JSON.parse(invokeError.message);
-          responseData = parsed;
-          console.log('✅ Body extraído via message JSON:', responseData);
-        } catch (e) {
-          // Não é JSON, ignorar
-        }
-      }
-      
-      // 4. Se ainda não tem data, fazer fetch direto para obter o erro
-      if (!responseData) {
-        try {
-          const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-          const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-          const { data: sessionData } = await supabase.auth.getSession();
-          const accessToken = sessionData?.session?.access_token;
-          
-          const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
-              'apikey': supabaseAnonKey,
-            },
-            body: JSON.stringify({
-              valor,
-              metodo_pagamento: 'credit_card',
-              email_cliente: email,
-              token_cartao: tokenCartao,
-              business_id: businessId,
-              referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-            }),
-          });
-          
-          if (!response.ok) {
-            const errorBody = await response.json();
-            responseData = errorBody;
-            console.log('✅ Body extraído via fetch direto:', responseData);
-          }
-        } catch (fetchError) {
-          console.warn('⚠️ Erro ao fazer fetch direto:', fetchError);
-        }
-      }
+    } catch (fetchError: any) {
+      console.error('❌ Erro ao fazer fetch para Edge Function:', fetchError);
+      responseError = fetchError;
+      responseData = { 
+        error: fetchError.message || 'Erro ao conectar com o servidor',
+        details: fetchError.toString()
+      };
     }
 
     // Se há erro, tentar extrair mensagem detalhada
