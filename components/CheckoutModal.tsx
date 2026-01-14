@@ -3,6 +3,7 @@ import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy } from 
 import { QRCodeSVG } from 'qrcode.react';
 import { criarPagamentoPix, criarPagamentoCartao, verificarStatusPagamento } from '../services/paymentService';
 import { PixPaymentResponse, CreditCardPaymentResponse } from '../types';
+import { supabase } from '../lib/supabase';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -140,14 +141,39 @@ export default function CheckoutModal({
       
       // Verificar se businessId parece ser um UUID válido
       const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      let validBusinessId = businessId;
+      
       if (businessId && !uuidRegex.test(businessId) && !businessId.match(/^\d+$/)) {
         console.warn('businessId não parece ser um UUID válido:', businessId);
-        setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente.`);
-        setLoading(false);
-        return;
+        console.log('Tentando buscar business correto do banco de dados...');
+        
+        // Tentar buscar o business correto do banco de dados
+        // Buscar todos os businesses ativos e usar o primeiro (ou buscar por nome se possível)
+        try {
+          const { data: businesses, error: bizError } = await supabase
+            .from('businesses')
+            .select('id')
+            .eq('status', 'ACTIVE')
+            .limit(1);
+          
+          if (!bizError && businesses && businesses.length > 0) {
+            validBusinessId = businesses[0].id;
+            console.log('Business válido encontrado no banco:', validBusinessId);
+          } else {
+            // Se não encontrar, mostrar erro
+            setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente. Se o problema persistir, entre em contato com o suporte.`);
+            setLoading(false);
+            return;
+          }
+        } catch (lookupError) {
+          console.error('Erro ao buscar business no banco:', lookupError);
+          setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente.`);
+          setLoading(false);
+          return;
+        }
       }
       
-      const response = await criarPagamentoPix(total, email, businessId);
+      const response = await criarPagamentoPix(total, email, validBusinessId);
       
       console.log('Resposta do pagamento PIX:', response);
       
