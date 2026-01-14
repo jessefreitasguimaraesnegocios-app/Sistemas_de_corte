@@ -3352,8 +3352,10 @@ export default function App() {
   
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [showBusinessLoginModal, setShowBusinessLoginModal] = useState(false);
+  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
+  const [adminLoginForm, setAdminLoginForm] = useState({ email: '', password: '' });
 
   // Função para buscar produtos de um business específico
   const fetchProductsForBusiness = useCallback(async (businessId: string) => {
@@ -3463,6 +3465,12 @@ export default function App() {
 
       if (error) {
         console.error('Erro ao buscar businesses:', error);
+        console.error('Detalhes do erro:', {
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint
+        });
         // Se der erro, usar dados iniciais como fallback
         setBusinesses(INITIAL_BUSINESSES);
         setBusinessLoadTimeout(true);
@@ -3495,8 +3503,15 @@ export default function App() {
         setBusinesses(INITIAL_BUSINESSES);
         setBusinessLoadTimeout(false);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Erro ao buscar businesses:', error);
+      console.error('Detalhes do erro:', {
+        message: error?.message,
+        code: error?.code,
+        details: error?.details,
+        hint: error?.hint,
+        stack: error?.stack
+      });
       setBusinesses(INITIAL_BUSINESSES);
       setBusinessLoadTimeout(true);
     } finally {
@@ -3570,11 +3585,20 @@ export default function App() {
           userRole = 'SUPER_ADMIN';
           window.localStorage.removeItem('pending_role');
           // Persistir role no metadata para o trigger atualizar user_profiles.role
-          try {
-            await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
-          } catch (e) {
-            console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
-          }
+          // Usar um pequeno delay para evitar race conditions e abort errors
+          setTimeout(async () => {
+            try {
+              const { data: currentSession } = await supabase.auth.getSession();
+              if (currentSession?.session) {
+                await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
+              }
+            } catch (e: any) {
+              // Ignorar erros de abort (componente desmontado ou requisição cancelada)
+              if (e?.name !== 'AbortError' && !e?.message?.includes('aborted')) {
+                console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
+              }
+            }
+          }, 100);
         }
         
         setUser({
@@ -3686,11 +3710,20 @@ export default function App() {
           if (roleParam === 'SUPER_ADMIN' || window.localStorage.getItem('pending_role') === 'SUPER_ADMIN') {
             userRole = 'SUPER_ADMIN';
             window.localStorage.removeItem('pending_role');
-            try {
-              await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
-            } catch (e) {
-              console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
-            }
+            // Usar um pequeno delay para evitar race conditions e abort errors
+            setTimeout(async () => {
+              try {
+                const { data: currentSession } = await supabase.auth.getSession();
+                if (currentSession?.session) {
+                  await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
+                }
+              } catch (e: any) {
+                // Ignorar erros de abort (componente desmontado ou requisição cancelada)
+                if (e?.name !== 'AbortError' && !e?.message?.includes('aborted')) {
+                  console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
+                }
+              }
+            }, 100);
           }
           
           setUser({
@@ -4011,15 +4044,7 @@ export default function App() {
                     Sou Estabelecimento
                   </button>
                   <button
-                    onClick={async () => {
-                      try {
-                        // Admin precisa de sessão real do Supabase (para salvar token via Edge Function)
-                        await signInWithGoogle('SUPER_ADMIN');
-                      } catch (error: any) {
-                        console.error('Erro ao fazer login admin com Google:', error);
-                        addToast('Erro ao fazer login admin. Verifique o Google OAuth.', 'error');
-                      }
-                    }}
+                    onClick={() => setShowAdminLoginModal(true)}
                     className="bg-white border-2 border-slate-200 p-4 rounded-2xl font-black text-xs text-slate-900 hover:bg-slate-900 hover:border-slate-900 hover:text-white transition-all active:scale-95 shadow-sm hover:shadow-md"
                   >
                     Admin Central
@@ -4522,6 +4547,101 @@ export default function App() {
                   className="text-sm text-slate-600 hover:text-indigo-600 font-bold transition-colors"
                 >
                   {isSignUp ? 'Já tem conta? Faça login' : 'Não tem conta? Criar conta'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Login para Admin */}
+      {showAdminLoginModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-md p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-900">
+                Login Admin Central
+              </h3>
+              <button
+                onClick={() => {
+                  setShowAdminLoginModal(false);
+                  setAdminLoginForm({ email: '', password: '' });
+                }}
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Email</label>
+                <input
+                  type="email"
+                  placeholder="admin@email.com"
+                  value={adminLoginForm.email}
+                  onChange={e => setAdminLoginForm({...adminLoginForm, email: e.target.value})}
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Senha</label>
+                <input
+                  type="password"
+                  placeholder="••••••••"
+                  value={adminLoginForm.password}
+                  onChange={e => setAdminLoginForm({...adminLoginForm, password: e.target.value})}
+                  className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="flex flex-col gap-3">
+                <button
+                  onClick={async () => {
+                    try {
+                      if (!adminLoginForm.email || !adminLoginForm.password) {
+                        addToast('Preencha email e senha', 'error');
+                        return;
+                      }
+                      window.localStorage.setItem('pending_role', 'SUPER_ADMIN');
+                      await signInWithEmail(adminLoginForm.email, adminLoginForm.password);
+                      addToast('Login realizado com sucesso!', 'success');
+                      setShowAdminLoginModal(false);
+                      setAdminLoginForm({ email: '', password: '' });
+                    } catch (error: any) {
+                      console.error('Erro ao fazer login admin:', error);
+                      addToast(
+                        error?.message || 'Email ou senha incorretos',
+                        'error'
+                      );
+                    }
+                  }}
+                  className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all"
+                >
+                  Entrar como Admin
+                </button>
+
+                <button
+                  onClick={async () => {
+                    try {
+                      window.localStorage.setItem('pending_role', 'SUPER_ADMIN');
+                      await signInWithGoogle('SUPER_ADMIN');
+                    } catch (error: any) {
+                      window.localStorage.removeItem('pending_role');
+                      console.error('Erro ao fazer login com Google:', error);
+                      addToast(
+                        error?.message?.includes('redirect')
+                          ? 'Erro de configuração. Verifique o guia GOOGLE_OAUTH_SETUP.md'
+                          : 'Erro ao fazer login com Google.',
+                        'error'
+                      );
+                    }
+                  }}
+                  className="w-full bg-white border-2 border-slate-200 text-slate-900 py-4 rounded-2xl font-black text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
+                >
+                  <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="" />
+                  Continuar com Google
                 </button>
               </div>
             </div>
