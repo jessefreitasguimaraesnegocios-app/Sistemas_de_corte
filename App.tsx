@@ -1514,7 +1514,7 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
 
 // --- CENTRAL ADMIN (HUB) ---
 
-const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: any) => {
+const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetchBusinesses }: any) => {
   const [showModal, setShowModal] = useState(false);
   const [newBiz, setNewBiz] = useState<any>({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
   const [loading, setLoading] = useState(false);
@@ -1674,7 +1674,30 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
         status: businessData.status || 'ACTIVE'
       };
 
-      setBusinesses([...businesses, biz]);
+      // Atualizar business_id no user_profiles
+      const { error: profileError } = await supabase
+        .from('user_profiles')
+        .update({ business_id: businessId })
+        .eq('id', ownerId);
+
+      if (profileError) {
+        console.warn('Erro ao atualizar business_id no perfil:', profileError);
+        // Não bloqueia o fluxo, apenas loga o aviso
+      }
+
+      // Recarregar businesses do banco para garantir sincronização
+      if (fetchBusinesses) {
+        await fetchBusinesses();
+      } else {
+        // Fallback: adicionar ao estado local
+        setBusinesses([...businesses, biz]);
+      }
+      
+      // Recarregar usuários se estiver na aba USERS
+      if (activeTab === 'USERS') {
+        fetchUsers();
+      }
+      
       addToast(`Parceiro ${newBiz.name} cadastrado! Credenciais: ${newBiz.email} / ${newBiz.password}`, 'success');
       setShowModal(false);
       setNewBiz({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
@@ -2814,11 +2837,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState('DASHBOARD');
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
-  const [businesses, setBusinesses] = useState<Business[]>(INITIAL_BUSINESSES);
+  const [businesses, setBusinesses] = useState<Business[]>([]);
+  const [userBusiness, setUserBusiness] = useState<Business | null>(null);
   const [collaborators, setCollaborators] = useState<Collaborator[]>(INITIAL_COLLABORATORS);
   const [services, setServices] = useState<Service[]>(INITIAL_SERVICES);
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [loadingBusinesses, setLoadingBusinesses] = useState(true);
   
   // Cart State Management
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -2829,6 +2854,57 @@ export default function App() {
   const [showBusinessLoginModal, setShowBusinessLoginModal] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
+
+  // Função para buscar businesses do banco de dados
+  const fetchBusinesses = async () => {
+    setLoadingBusinesses(true);
+    try {
+      const { data, error } = await supabase
+        .from('businesses')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar businesses:', error);
+        // Se der erro, usar dados iniciais como fallback
+        setBusinesses(INITIAL_BUSINESSES);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        // Converter dados do banco para o formato do Business
+        const businessesData: Business[] = data.map((b: any) => ({
+          id: b.id,
+          name: b.name,
+          type: b.type as 'BARBERSHOP' | 'SALON',
+          description: b.description || '',
+          address: b.address || '',
+          image: b.image || (b.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+          rating: Number(b.rating) || 0,
+          ownerId: b.owner_id,
+          monthlyFee: Number(b.monthly_fee) || 0,
+          revenueSplit: Number(b.revenue_split) || 10,
+          status: b.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+          gatewayId: b.gateway_id,
+          lastPaymentDate: b.last_payment_date
+        }));
+        setBusinesses(businessesData);
+      } else {
+        // Se não houver dados, usar dados iniciais como fallback
+        setBusinesses(INITIAL_BUSINESSES);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar businesses:', error);
+      setBusinesses(INITIAL_BUSINESSES);
+    } finally {
+      setLoadingBusinesses(false);
+    }
+  };
+
+  // Carregar businesses quando o app inicia
+  useEffect(() => {
+    fetchBusinesses();
+  }, []);
 
   useEffect(() => {
     // Verificar se há um parâmetro de role na URL (após redirect do OAuth)
@@ -2845,13 +2921,17 @@ export default function App() {
           userRole = 'BUSINESS_OWNER';
           window.localStorage.removeItem('pending_role');
           
-          // Se não tem business_id, buscar ou usar o primeiro disponível
+          // Se não tem business_id, buscar do banco de dados
           if (!businessId) {
-            // Por enquanto, usar o primeiro business disponível
-            // Em produção, você pode buscar na tabela businesses pelo ownerId ou email
-            // Usar uma função para acessar o estado atual
-            const currentBusinesses = businesses;
-            businessId = currentBusinesses[0]?.id || '1';
+            const { data: businessData } = await supabase
+              .from('businesses')
+              .select('id')
+              .eq('owner_id', session.user.id)
+              .single();
+            
+            if (businessData) {
+              businessId = businessData.id;
+            }
           }
         }
         
@@ -2863,6 +2943,42 @@ export default function App() {
           avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
           businessId: businessId
         });
+        
+        // Se for BUSINESS_OWNER, buscar o business do banco
+        if (userRole === 'BUSINESS_OWNER' && session.user.id) {
+          const { data: businessData } = await supabase
+            .from('businesses')
+            .select('*')
+            .eq('owner_id', session.user.id)
+            .single();
+          
+          if (businessData) {
+            const biz: Business = {
+              id: businessData.id,
+              name: businessData.name,
+              type: businessData.type as 'BARBERSHOP' | 'SALON',
+              description: businessData.description || '',
+              address: businessData.address || '',
+              image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+              rating: Number(businessData.rating) || 0,
+              ownerId: businessData.owner_id,
+              monthlyFee: Number(businessData.monthly_fee) || 0,
+              revenueSplit: Number(businessData.revenue_split) || 10,
+              status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+              gatewayId: businessData.gateway_id,
+              lastPaymentDate: businessData.last_payment_date
+            };
+            setUserBusiness(biz);
+            // Atualizar lista de businesses
+            setBusinesses(prev => {
+              const exists = prev.find(b => b.id === biz.id);
+              if (!exists) {
+                return [...prev, biz];
+              }
+              return prev.map(b => b.id === biz.id ? biz : b);
+            });
+          }
+        }
         
         // Limpar parâmetros da URL
         if (roleParam) {
@@ -2884,9 +3000,16 @@ export default function App() {
           userRole = 'BUSINESS_OWNER';
           window.localStorage.removeItem('pending_role');
           if (!businessId) {
-            // Usar uma função para acessar o estado atual
-            const currentBusinesses = businesses;
-            businessId = currentBusinesses[0]?.id || '1';
+            // Buscar business do banco de dados pelo owner_id
+            const { data: businessData } = await supabase
+              .from('businesses')
+              .select('id')
+              .eq('owner_id', session.user.id)
+              .single();
+            
+            if (businessData) {
+              businessId = businessData.id;
+            }
           }
         }
         
@@ -2898,6 +3021,43 @@ export default function App() {
           avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
           businessId: businessId
         });
+        
+        // Se for BUSINESS_OWNER, buscar o business do banco
+        if (userRole === 'BUSINESS_OWNER' && session.user.id) {
+          supabase
+            .from('businesses')
+            .select('*')
+            .eq('owner_id', session.user.id)
+            .single()
+            .then(({ data: businessData, error }) => {
+              if (!error && businessData) {
+                const biz: Business = {
+                  id: businessData.id,
+                  name: businessData.name,
+                  type: businessData.type as 'BARBERSHOP' | 'SALON',
+                  description: businessData.description || '',
+                  address: businessData.address || '',
+                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                  rating: Number(businessData.rating) || 0,
+                  ownerId: businessData.owner_id,
+                  monthlyFee: Number(businessData.monthly_fee) || 0,
+                  revenueSplit: Number(businessData.revenue_split) || 10,
+                  status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+                  gatewayId: businessData.gateway_id,
+                  lastPaymentDate: businessData.last_payment_date
+                };
+                setUserBusiness(biz);
+                // Atualizar lista de businesses
+                setBusinesses(prev => {
+                  const exists = prev.find(b => b.id === biz.id);
+                  if (!exists) {
+                    return [...prev, biz];
+                  }
+                  return prev.map(b => b.id === biz.id ? biz : b);
+                });
+              }
+            });
+        }
       }
     });
   }, []);
@@ -3118,11 +3278,23 @@ export default function App() {
     }
     
     if (user.role === 'SUPER_ADMIN') {
-      return <CentralAdminView businesses={businesses} setBusinesses={setBusinesses} activeTab={activeTab} addToast={addToast} />;
+      return <CentralAdminView businesses={businesses} setBusinesses={setBusinesses} activeTab={activeTab} addToast={addToast} fetchBusinesses={fetchBusinesses} />;
     }
     
     if (user.role === 'BUSINESS_OWNER') {
-      const biz = businesses.find(b => b.id === user.businessId) || businesses[0];
+      // Usar userBusiness se disponível, senão buscar na lista
+      const biz = userBusiness || businesses.find(b => b.ownerId === user.id || b.id === user.businessId);
+      
+      if (!biz) {
+        return (
+          <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+            <div className="text-center">
+              <p className="text-slate-600 font-semibold">Carregando estabelecimento...</p>
+            </div>
+          </div>
+        );
+      }
+      
       return (
         <BusinessOwnerDashboard 
           business={biz} 

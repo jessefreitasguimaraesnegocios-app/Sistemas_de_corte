@@ -124,17 +124,27 @@ CREATE POLICY "Users can update own profile"
   USING (auth.uid() = id)
   WITH CHECK (auth.uid() = id);
 
--- PolÃ­tica: SUPER_ADMIN pode ver todos os perfis
+-- Função auxiliar para verificar se o usuário é SUPER_ADMIN (se não existir)
+CREATE OR REPLACE FUNCTION is_super_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM user_profiles
+    WHERE user_profiles.id = auth.uid()
+    AND user_profiles.role = 'SUPER_ADMIN'
+  );
+END;
+$$;
+
+-- Política: SUPER_ADMIN pode ver todos os perfis
 DROP POLICY IF EXISTS "Super admins can view all profiles" ON user_profiles;
 CREATE POLICY "Super admins can view all profiles"
   ON user_profiles FOR SELECT
-  USING (
-    EXISTS (
-      SELECT 1 FROM auth.users
-      WHERE auth.users.id = auth.uid()
-      AND auth.users.raw_user_meta_data->>'role' = 'SUPER_ADMIN'
-    )
-  );
+  USING (is_super_admin());
 
 -- PolÃ­tica: BUSINESS_OWNER pode ver perfis de clientes que fizeram agendamentos em seu negÃ³cio
 DROP POLICY IF EXISTS "Business owners can view customer profiles" ON user_profiles;
