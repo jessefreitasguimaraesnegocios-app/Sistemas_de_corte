@@ -1,7 +1,7 @@
 // Deno Edge Function - runs in Deno runtime
-/// <reference path="./deno.d.ts" />
+/// <reference path="../deno.d.ts" />
 // @ts-ignore - Deno imports are resolved at runtime
-import { serve } from "https://deno.land/x/sift/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 // @ts-ignore - ESM imports are resolved at runtime
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
@@ -17,7 +17,7 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ||
                      "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
-serve(async (req) => {
+serve(async (req: Request) => {
   // CORS headers
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",

@@ -2,3 +2,6 @@
 
 [functions.createPayment]
 verify_jwt = false
+
+[functions.checkPaymentStatus]
+verify_jwt = false
