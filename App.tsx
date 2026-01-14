@@ -2027,8 +2027,15 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       
       const desc = await generateBusinessDescription(newBiz.name, newBiz.type);
       
-      // Gerar ID único para o business
-      const businessId = `biz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      // Gerar UUID válido para o business (formato UUID v4)
+      const generateUUID = () => {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0;
+          const v = c === 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+      };
+      const businessId = generateUUID();
       
       // Criar business no banco de dados
       const { data: businessData, error: businessError } = await supabase
@@ -2063,6 +2070,13 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
         }
         
         throw new Error(errorMessage);
+      }
+
+      // Validar que o businessId retornado é um UUID válido
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (!uuidRegex.test(businessData.id)) {
+        console.error('Business ID retornado não é um UUID válido:', businessData.id);
+        throw new Error('Erro: ID do estabelecimento gerado não é válido. Tente novamente.');
       }
 
       const biz: Business = {
