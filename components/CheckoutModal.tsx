@@ -12,6 +12,7 @@ interface CheckoutModalProps {
   email: string;
   businessId?: string;
   onPaymentSuccess: () => void;
+  productId?: string; // ID do produto para buscar business_id correto
 }
 
 type PaymentTab = 'pix' | 'card';
@@ -23,6 +24,7 @@ export default function CheckoutModal({
   email,
   businessId,
   onPaymentSuccess,
+  productId,
 }: CheckoutModalProps) {
   const [activeTab, setActiveTab] = useState<PaymentTab>('pix');
   const [loading, setLoading] = useState(false);
@@ -147,27 +149,61 @@ export default function CheckoutModal({
         console.warn('businessId não parece ser um UUID válido:', businessId);
         console.log('Tentando buscar business correto do banco de dados...');
         
-        // Tentar buscar o business correto do banco de dados
-        // Buscar todos os businesses ativos e usar o primeiro (ou buscar por nome se possível)
         try {
-          const { data: businesses, error: bizError } = await supabase
-            .from('businesses')
-            .select('id')
-            .eq('status', 'ACTIVE')
-            .limit(1);
+          // Primeiro, tentar buscar o business_id correto usando o ID do produto
+          if (productId && uuidRegex.test(productId)) {
+            console.log('Buscando business_id usando productId:', productId);
+            const { data: productData, error: productError } = await supabase
+              .from('products')
+              .select('business_id')
+              .eq('id', productId)
+              .single();
+            
+            if (!productError && productData && productData.business_id) {
+              const productBusinessId = productData.business_id;
+              console.log('business_id encontrado no produto:', productBusinessId);
+              
+              // Verificar se o business_id do produto é um UUID válido
+              if (uuidRegex.test(productBusinessId)) {
+                validBusinessId = productBusinessId;
+                console.log('Usando business_id do produto:', validBusinessId);
+              } else {
+                console.warn('business_id do produto também é inválido:', productBusinessId);
+              }
+            }
+          }
           
-          if (!bizError && businesses && businesses.length > 0) {
-            validBusinessId = businesses[0].id;
-            console.log('Business válido encontrado no banco:', validBusinessId);
-          } else {
-            // Se não encontrar, mostrar erro
-            setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente. Se o problema persistir, entre em contato com o suporte.`);
-            setLoading(false);
-            return;
+          // Se ainda não tem um businessId válido, buscar businesses com UUID válido
+          if (!validBusinessId || !uuidRegex.test(validBusinessId)) {
+            console.log('Buscando businesses ativos com UUID válido...');
+            const { data: businesses, error: bizError } = await supabase
+              .from('businesses')
+              .select('id')
+              .eq('status', 'ACTIVE');
+            
+            if (!bizError && businesses && businesses.length > 0) {
+              // Filtrar apenas businesses com UUID válido
+              const validBusinesses = businesses.filter(b => uuidRegex.test(b.id));
+              
+              if (validBusinesses.length > 0) {
+                validBusinessId = validBusinesses[0].id;
+                console.log('Business válido encontrado no banco:', validBusinessId);
+              } else {
+                console.error('Nenhum business com UUID válido encontrado no banco');
+                setError(`ID do estabelecimento inválido: ${businessId}. Nenhum estabelecimento válido encontrado no banco de dados. Por favor, entre em contato com o suporte.`);
+                setLoading(false);
+                return;
+              }
+            } else {
+              console.error('Erro ao buscar businesses ou nenhum encontrado:', bizError);
+              setError(`ID do estabelecimento inválido: ${businessId}. Erro ao buscar estabelecimento válido. Por favor, recarregue a página e tente novamente.`);
+              setLoading(false);
+              return;
+            }
           }
         } catch (lookupError) {
           console.error('Erro ao buscar business no banco:', lookupError);
-          setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente.`);
+          setError(`ID do estabelecimento inválido: ${businessId}. Erro ao buscar estabelecimento. Por favor, recarregue a página e tente novamente.`);
           setLoading(false);
           return;
         }

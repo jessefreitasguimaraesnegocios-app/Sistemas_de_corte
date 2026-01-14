@@ -4268,25 +4268,8 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         total={cartTotal}
         email={user?.email || ''}
-        businessId={(() => {
-          const bid = cart[0]?.product.businessId;
-          if (bid) {
-            console.log('CheckoutModal - businessId do produto:', bid);
-            console.log('CheckoutModal - produto completo:', cart[0]?.product);
-            
-            // Se o businessId não é um UUID válido, tentar encontrar o business correto
-            const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-            if (!uuidRegex.test(bid) && !bid.match(/^\d+$/)) {
-              console.warn('businessId inválido detectado, tentando encontrar business correto...');
-              // Se o produto tem um businessId inválido, usar o selectedBusiness se disponível
-              if (selectedBusiness?.id) {
-                console.log('Usando selectedBusiness.id:', selectedBusiness.id);
-                return selectedBusiness.id;
-              }
-            }
-          }
-          return bid;
-        })()}
+        businessId={cart[0]?.product.businessId}
+        productId={cart[0]?.product.id}
         onPaymentSuccess={handlePaymentSuccess}
       />
 
