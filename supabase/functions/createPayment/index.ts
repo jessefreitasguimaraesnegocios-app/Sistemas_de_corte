@@ -6,7 +6,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Configurações do Mercado Pago (apenas da plataforma)
-const SPONSOR_ID_LOJA = Deno.env.get("MP_SPONSOR_ID_LOJA")!;
+const SPONSOR_ID_LOJA_STR = Deno.env.get("MP_SPONSOR_ID_LOJA") || "";
+// Converter para número, pois a API do Mercado Pago requer sponsor_id numérico
+const SPONSOR_ID_LOJA = SPONSOR_ID_LOJA_STR ? Number(SPONSOR_ID_LOJA_STR) : null;
 const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 
 // URL e Service Role Key do Supabase
@@ -91,9 +93,12 @@ serve(async (req: Request) => {
     }
 
     // Validação de variáveis de ambiente da plataforma
-    if (!SPONSOR_ID_LOJA) {
+    if (!SPONSOR_ID_LOJA || isNaN(SPONSOR_ID_LOJA)) {
       return new Response(
-        JSON.stringify({ error: "Configuração do Mercado Pago incompleta: MP_SPONSOR_ID_LOJA não configurado" }),
+        JSON.stringify({ 
+          error: "Configuração do Mercado Pago incompleta: MP_SPONSOR_ID_LOJA não configurado ou inválido",
+          hint: "MP_SPONSOR_ID_LOJA deve ser um número válido"
+        }),
         { 
           status: 500, 
           headers: { ...corsHeaders, "Content-Type": "application/json" } 
