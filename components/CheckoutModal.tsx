@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
-import { criarPagamentoPix, criarPagamentoCartao } from '../services/paymentService';
+import { criarPagamentoPix, criarPagamentoCartao, verificarStatusPagamento } from '../services/paymentService';
 import { PixPaymentResponse, CreditCardPaymentResponse } from '../types';
 
 interface CheckoutModalProps {
@@ -29,6 +29,8 @@ export default function CheckoutModal({
   const [cardData, setCardData] = useState<CreditCardPaymentResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [checkingPayment, setCheckingPayment] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
 
   // Formulário de cartão
   const [cardNumber, setCardNumber] = useState('');
@@ -52,30 +54,109 @@ export default function CheckoutModal({
       setCardExpiry('');
       setCardCvv('');
       setCopied(false);
+      setCheckingPayment(false);
+      setPaymentStatus(null);
     }
   }, [isOpen]);
 
+  // Polling para verificar status do pagamento PIX
+  useEffect(() => {
+    if (!pixData || !pixData.payment_id || paymentStatus === 'approved') return;
+
+    const checkPaymentStatus = async () => {
+      try {
+        const result = await verificarStatusPagamento(pixData.payment_id);
+
+        if (result.approved) {
+          setPaymentStatus('approved');
+          setCheckingPayment(false);
+          setTimeout(() => {
+            onPaymentSuccess();
+            onClose();
+          }, 2000);
+        } else if (result.status === 'rejected' || result.status === 'cancelled' || result.status === 'error') {
+          setPaymentStatus('rejected');
+          setCheckingPayment(false);
+          setError('Pagamento rejeitado ou cancelado. Tente novamente.');
+        }
+      } catch (err) {
+        console.error('Erro ao verificar status do pagamento:', err);
+        // Não interromper o polling por erros temporários
+      }
+    };
+
+    if (pixData && !checkingPayment && paymentStatus === null) {
+      setCheckingPayment(true);
+      // Verificar imediatamente e depois a cada 3 segundos
+      checkPaymentStatus();
+      const interval = setInterval(checkPaymentStatus, 3000);
+      
+      // Limpar após 10 minutos (timeout)
+      const timeout = setTimeout(() => {
+        clearInterval(interval);
+        setCheckingPayment(false);
+        if (paymentStatus !== 'approved') {
+          setError('Tempo limite excedido. Por favor, tente novamente.');
+        }
+      }, 600000); // 10 minutos
+
+      return () => {
+        clearInterval(interval);
+        clearTimeout(timeout);
+      };
+    }
+  }, [pixData, checkingPayment, paymentStatus, onPaymentSuccess, onClose]);
+
   const handlePixPayment = async () => {
+    // Validações
+    if (!email || !email.includes('@')) {
+      setError('Email inválido. Por favor, verifique seu email.');
+      return;
+    }
+
+    if (!businessId) {
+      setError('ID do estabelecimento não encontrado. Por favor, recarregue a página.');
+      return;
+    }
+
+    if (total <= 0) {
+      setError('Valor inválido. O total deve ser maior que zero.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
+    setPaymentStatus(null);
 
     try {
       const response = await criarPagamentoPix(total, email, businessId);
       
-      if (response.success && response.qr_code_base64) {
+      if (response.success && (response.qr_code_base64 || response.qr_code)) {
         setPixData(response);
+        setPaymentStatus('pending');
       } else {
-        setError(response.error || 'Erro ao gerar QR Code PIX');
+        setError(response.error || 'Erro ao gerar QR Code PIX. Verifique as configurações do Mercado Pago.');
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao processar pagamento PIX');
+      console.error('Erro ao criar pagamento PIX:', err);
+      setError(err.message || 'Erro ao processar pagamento PIX. Tente novamente ou use outro método de pagamento.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleCardPayment = async () => {
-    // Validação básica
+    // Validações
+    if (!email || !email.includes('@')) {
+      setError('Email inválido. Por favor, verifique seu email.');
+      return;
+    }
+
+    if (!businessId) {
+      setError('ID do estabelecimento não encontrado. Por favor, recarregue a página.');
+      return;
+    }
+
     if (!cardNumber || !cardName || !cardExpiry || !cardCvv) {
       setError('Preencha todos os campos do cartão');
       return;
@@ -85,6 +166,19 @@ export default function CheckoutModal({
     const cardNumberClean = cardNumber.replace(/\s/g, '');
     if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
       setError('Número do cartão inválido');
+      return;
+    }
+
+    // Validar data de expiração
+    const [month, year] = cardExpiry.split('/');
+    if (!month || !year || month.length !== 2 || year.length !== 2) {
+      setError('Data de validade inválida. Use o formato MM/AA');
+      return;
+    }
+
+    // Validar CVV
+    if (cardCvv.length < 3 || cardCvv.length > 4) {
+      setError('CVV inválido');
       return;
     }
 
@@ -112,10 +206,11 @@ export default function CheckoutModal({
           onClose();
         }, 2000);
       } else {
-        setError(response.error || `Pagamento não aprovado: ${response.status_detail}`);
+        setError(response.error || `Pagamento não aprovado: ${response.status_detail || 'Erro desconhecido'}`);
       }
     } catch (err: any) {
-      setError(err.message || 'Erro ao processar pagamento com cartão');
+      console.error('Erro ao processar pagamento com cartão:', err);
+      setError(err.message || 'Erro ao processar pagamento com cartão. Verifique os dados e tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -282,9 +377,25 @@ export default function CheckoutModal({
                       )}
                     </div>
                     <div className="p-4 bg-indigo-50 border border-indigo-200 rounded-xl">
-                      <p className="text-sm text-indigo-700 font-semibold">
-                        Aguardando pagamento... O pagamento será confirmado automaticamente.
-                      </p>
+                      {checkingPayment && paymentStatus === 'pending' ? (
+                        <div className="flex items-center gap-3">
+                          <Loader2 size={20} className="animate-spin text-indigo-600" />
+                          <p className="text-sm text-indigo-700 font-semibold">
+                            Aguardando pagamento... Verificando automaticamente...
+                          </p>
+                        </div>
+                      ) : paymentStatus === 'approved' ? (
+                        <div className="flex items-center gap-3">
+                          <CheckCircle2 size={20} className="text-green-600" />
+                          <p className="text-sm text-green-700 font-semibold">
+                            Pagamento confirmado! Redirecionando...
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-sm text-indigo-700 font-semibold">
+                          Escaneie o QR Code e finalize o pagamento. A confirmação será automática.
+                        </p>
+                      )}
                     </div>
                   </div>
                 )}

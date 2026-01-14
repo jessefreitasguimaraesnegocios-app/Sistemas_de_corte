@@ -202,6 +202,33 @@ serve(async (req) => {
       );
     }
 
+    // Salvar transação no banco de dados
+    const partner_net = valor - application_fee;
+    const transactionStatus = mp_result.status === "approved" ? "PAID" : 
+                            mp_result.status === "pending" ? "PENDING" : 
+                            mp_result.status === "rejected" ? "PENDING" : "PENDING";
+
+    const { error: transactionError } = await supabase
+      .from("transactions")
+      .insert({
+        business_id: business_id,
+        amount: valor,
+        admin_fee: application_fee,
+        partner_net: partner_net,
+        date: new Date().toISOString(),
+        status: transactionStatus,
+        gateway: "MERCADO_PAGO",
+        payment_id: mp_result.id.toString(),
+        payment_method: metodo_pagamento === "pix" ? "pix" : "credit_card",
+        customer_email: email_cliente,
+        external_reference: referencia_externa,
+      });
+
+    if (transactionError) {
+      console.error("Erro ao salvar transação:", transactionError);
+      // Não falhar o pagamento por erro ao salvar transação, apenas logar
+    }
+
     // Retorna QR Code PIX ou resultado do cartão
     if (metodo_pagamento === "pix") {
       const qrCode = mp_result.point_of_interaction?.transaction_data?.qr_code_base64;

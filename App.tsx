@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   LayoutGrid, Calendar, ShoppingBag, Settings, Users, DollarSign, LogOut, 
   Plus, Search, Star, Clock, Menu, X, TrendingUp, CreditCard, AlertCircle, 
@@ -229,12 +229,13 @@ const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, on
 
 // --- CRM BUSINESS OWNER VIEW ---
 
-const BusinessOwnerDashboard = ({ business, collaborators, products, appointments, setCollaborators, setProducts, setAppointments, addToast, setBusinesses, businesses }: any) => {
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'TEAM' | 'SETTINGS'>('DASHBOARD');
+const BusinessOwnerDashboard = ({ business, collaborators, products, services, appointments, setCollaborators, setProducts, setServices, setAppointments, addToast, setBusinesses, businesses }: any) => {
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'SERVICES' | 'TEAM' | 'SETTINGS'>('DASHBOARD');
   const [showModal, setShowModal] = useState<string | null>(null);
   const [newItem, setNewItem] = useState<any>({});
   const [editingItem, setEditingItem] = useState<any>(null);
-  const [confirmDeleteModal, setConfirmDeleteModal] = useState<{type: 'product' | 'collaborator', id: string, name: string} | null>(null);
+  const [confirmDeleteModal, setConfirmDeleteModal] = useState<{type: 'product' | 'collaborator' | 'service', id: string, name: string} | null>(null);
+  const [loadingServices, setLoadingServices] = useState(false);
   const [showBusinessEditModal, setShowBusinessEditModal] = useState(false);
   const [businessEditForm, setBusinessEditForm] = useState({ name: business.name, image: business.image });
   const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
@@ -261,7 +262,44 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
     setBusinessEditForm({ name: business.name, image: business.image });
   }, [business.name, business.image]);
 
-  const handleAddItem = () => {
+  // Buscar serviços do banco de dados
+  const fetchServices = useCallback(async () => {
+    if (!business?.id) return;
+    setLoadingServices(true);
+    try {
+      const { data, error } = await supabase
+        .from('services')
+        .select('*')
+        .eq('business_id', business.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar serviços:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const servicesData: Service[] = data.map((s: any) => ({
+          id: s.id,
+          businessId: s.business_id,
+          name: s.name,
+          price: Number(s.price),
+          duration: s.duration,
+        }));
+        setServices(servicesData);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar serviços:', error);
+    } finally {
+      setLoadingServices(false);
+    }
+  }, [business?.id, setServices]);
+
+  useEffect(() => {
+    fetchServices();
+  }, [fetchServices]);
+
+  const handleAddItem = async () => {
     if (showModal === 'PRODUCT') {
       if (editingItem && editingItem._type === 'product') {
         // Editar produto existente
@@ -308,23 +346,86 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
         setCollaborators([...collaborators, pro]);
         addToast('Novo profissional cadastrado!', 'success');
       }
+    } else if (showModal === 'SERVICE') {
+      if (editingItem && editingItem._type === 'service') {
+        // Editar serviço existente
+        try {
+          const { error } = await supabase
+            .from('services')
+            .update({
+              name: newItem.name,
+              price: Number(newItem.price),
+              duration: Number(newItem.duration),
+              description: newItem.description || null,
+              category: newItem.category || null,
+            })
+            .eq('id', editingItem.id);
+
+          if (error) throw error;
+
+          const updated = services.map((s: any) => 
+            s.id === editingItem.id 
+              ? { ...s, name: newItem.name, price: Number(newItem.price), duration: Number(newItem.duration) }
+              : s
+          );
+          setServices(updated);
+          addToast('Serviço atualizado!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao atualizar serviço:', error);
+          addToast('Erro ao atualizar serviço. Tente novamente.', 'error');
+        }
+      } else {
+        // Adicionar novo serviço
+        try {
+          const { data, error } = await supabase
+            .from('services')
+            .insert({
+              business_id: business.id,
+              name: newItem.name,
+              price: Number(newItem.price),
+              duration: Number(newItem.duration),
+              description: newItem.description || null,
+              category: newItem.category || null,
+              is_active: true,
+            })
+            .select()
+            .single();
+
+          if (error) throw error;
+
+          const newService: Service = {
+            id: data.id,
+            businessId: data.business_id,
+            name: data.name,
+            price: Number(data.price),
+            duration: data.duration,
+          };
+          setServices([...services, newService]);
+          addToast('Serviço cadastrado com sucesso!', 'success');
+        } catch (error: any) {
+          console.error('Erro ao criar serviço:', error);
+          addToast('Erro ao cadastrar serviço. Tente novamente.', 'error');
+        }
+      }
     }
     setShowModal(null);
     setNewItem({});
     setEditingItem(null);
   };
 
-  const handleEditItem = (item: any, type: 'product' | 'collaborator') => {
+  const handleEditItem = (item: any, type: 'product' | 'collaborator' | 'service') => {
     setEditingItem({ ...item, _type: type });
     setNewItem({ ...item, _type: type });
-    setShowModal(type === 'product' ? 'PRODUCT' : 'TEAM');
+    if (type === 'product') setShowModal('PRODUCT');
+    else if (type === 'collaborator') setShowModal('TEAM');
+    else if (type === 'service') setShowModal('SERVICE');
   };
 
-  const handleDeleteItem = (id: string, type: 'product' | 'collaborator', name: string) => {
+  const handleDeleteItem = (id: string, type: 'product' | 'collaborator' | 'service', name: string) => {
     setConfirmDeleteModal({ type, id, name });
   };
 
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!confirmDeleteModal) return;
 
     const { type, id, name } = confirmDeleteModal;
@@ -335,6 +436,21 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
     } else if (type === 'collaborator') {
       setCollaborators(collaborators.filter((c: any) => c.id !== id));
       addToast(`Profissional "${name}" removido.`, 'success');
+    } else if (type === 'service') {
+      try {
+        const { error } = await supabase
+          .from('services')
+          .delete()
+          .eq('id', id);
+
+        if (error) throw error;
+
+        setServices(services.filter((s: any) => s.id !== id));
+        addToast(`Serviço "${name}" removido.`, 'success');
+      } catch (error: any) {
+        console.error('Erro ao deletar serviço:', error);
+        addToast('Erro ao remover serviço. Tente novamente.', 'error');
+      }
     }
 
     setConfirmDeleteModal(null);
@@ -382,6 +498,62 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
                 </div>
               )}
             </div>
+          </div>
+        );
+      case 'SERVICES':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex justify-between items-center">
+              <h3 className="text-xl font-black text-slate-900">Serviços Oferecidos</h3>
+              <button onClick={() => setShowModal('SERVICE')} className="bg-indigo-600 text-white px-6 py-2 rounded-xl text-xs font-black shadow-xl hover:bg-indigo-700 transition-colors">+ Novo Serviço</button>
+            </div>
+            {loadingServices ? (
+              <div className="flex items-center justify-center py-12">
+                <RefreshCw className="animate-spin text-indigo-600" size={32} />
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {services.filter((s: any) => s.businessId === business.id).map((service: any) => (
+                  <div key={service.id} className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6 flex flex-col group hover:border-indigo-500 transition-all">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex-1">
+                        <h4 className="font-bold text-lg text-slate-900 mb-1">{service.name}</h4>
+                        <div className="flex items-center gap-4 text-sm text-slate-600">
+                          <span className="flex items-center gap-1">
+                            <Clock size={14} />
+                            {service.duration} min
+                          </span>
+                          <span className="text-indigo-600 font-black">R$ {service.price.toFixed(2)}</span>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                        <button 
+                          onClick={() => handleEditItem(service, 'service')}
+                          className="p-2 bg-slate-50 text-slate-400 hover:text-indigo-600 rounded-xl transition-colors"
+                          title="Editar serviço"
+                        >
+                          <Edit3 size={16} />
+                        </button>
+                        <button 
+                          onClick={() => handleDeleteItem(service.id, 'service', service.name)}
+                          className="p-2 bg-slate-50 text-slate-400 hover:text-red-500 rounded-xl transition-colors"
+                          title="Remover serviço"
+                        >
+                          <Trash2 size={16} />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+                {services.filter((s: any) => s.businessId === business.id).length === 0 && (
+                  <div className="col-span-full bg-white p-12 rounded-[2rem] border-2 border-dashed border-slate-100 text-center">
+                    <Scissors className="mx-auto text-slate-200 mb-4" size={48} />
+                    <p className="text-slate-400 font-bold">Nenhum serviço cadastrado.</p>
+                    <p className="text-slate-300 text-sm mt-2">Adicione serviços para que clientes possam agendar.</p>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         );
       case 'STORE':
@@ -624,6 +796,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
              { id: 'DASHBOARD', icon: LayoutGrid },
              { id: 'APPOINTMENTS', icon: Calendar },
              { id: 'STORE', icon: ShoppingBag },
+             { id: 'SERVICES', icon: Scissors },
              { id: 'TEAM', icon: Users },
              { id: 'SETTINGS', icon: Settings },
            ].map(tab => (
@@ -646,8 +819,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
             <div className="flex justify-between items-center mb-10">
               <h3 className="text-2xl font-black text-slate-900">
                 {editingItem 
-                  ? (showModal === 'PRODUCT' ? 'Editar Produto' : 'Editar Profissional')
-                  : (showModal === 'PRODUCT' ? 'Novo Produto' : 'Novo Profissional')
+                  ? (showModal === 'PRODUCT' ? 'Editar Produto' : showModal === 'SERVICE' ? 'Editar Serviço' : 'Editar Profissional')
+                  : (showModal === 'PRODUCT' ? 'Novo Produto' : showModal === 'SERVICE' ? 'Novo Serviço' : 'Novo Profissional')
                 }
               </h3>
               <button 
@@ -662,7 +835,65 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
               </button>
             </div>
             <div className="space-y-6">
-              {showModal === 'PRODUCT' ? (
+              {showModal === 'SERVICE' ? (
+                <>
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nome do Serviço</label>
+                    <input
+                      type="text"
+                      value={newItem.name || ''}
+                      onChange={(e) => setNewItem({...newItem, name: e.target.value})}
+                      placeholder="Ex: Corte Masculino, Pintura de Unhas"
+                      className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Preço (R$)</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        min="0"
+                        value={newItem.price || ''}
+                        onChange={(e) => setNewItem({...newItem, price: e.target.value})}
+                        placeholder="0.00"
+                        className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Duração (min)</label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={newItem.duration || ''}
+                        onChange={(e) => setNewItem({...newItem, duration: e.target.value})}
+                        placeholder="30"
+                        className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Categoria (opcional)</label>
+                    <input
+                      type="text"
+                      value={newItem.category || ''}
+                      onChange={(e) => setNewItem({...newItem, category: e.target.value})}
+                      placeholder="Ex: Corte, Pintura, Manicure"
+                      className="w-full p-4 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Descrição (opcional)</label>
+                    <textarea
+                      value={newItem.description || ''}
+                      onChange={(e) => setNewItem({...newItem, description: e.target.value})}
+                      placeholder="Descrição detalhada do serviço..."
+                      rows={3}
+                      className="w-full p-4 bg-slate-50 border-none rounded-2xl font-medium text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
+                    />
+                  </div>
+                </>
+              ) : showModal === 'PRODUCT' ? (
                 <>
                   {/* Foto do Produto */}
                   <div className="flex flex-col items-center gap-4 pb-2">
@@ -1503,7 +1734,7 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
             setShowCalendar(true);
           }}
           total={bookingService.price}
-          email="cliente@example.com"
+          email={user?.email || "cliente@example.com"}
           businessId={business.id}
           onPaymentSuccess={handlePaymentSuccess}
         />
@@ -2844,6 +3075,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>(INITIAL_PRODUCTS);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loadingBusinesses, setLoadingBusinesses] = useState(true);
+  const [businessLoadTimeout, setBusinessLoadTimeout] = useState(false);
   
   // Cart State Management
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -2856,8 +3088,9 @@ export default function App() {
   const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
 
   // Função para buscar businesses do banco de dados
-  const fetchBusinesses = async () => {
+  const fetchBusinesses = useCallback(async () => {
     setLoadingBusinesses(true);
+    setBusinessLoadTimeout(false);
     try {
       const { data, error } = await supabase
         .from('businesses')
@@ -2868,6 +3101,7 @@ export default function App() {
         console.error('Erro ao buscar businesses:', error);
         // Se der erro, usar dados iniciais como fallback
         setBusinesses(INITIAL_BUSINESSES);
+        setBusinessLoadTimeout(true);
         return;
       }
 
@@ -2889,22 +3123,52 @@ export default function App() {
           lastPaymentDate: b.last_payment_date
         }));
         setBusinesses(businessesData);
+        setBusinessLoadTimeout(false);
       } else {
         // Se não houver dados, usar dados iniciais como fallback
         setBusinesses(INITIAL_BUSINESSES);
+        setBusinessLoadTimeout(false);
       }
     } catch (error) {
       console.error('Erro ao buscar businesses:', error);
       setBusinesses(INITIAL_BUSINESSES);
+      setBusinessLoadTimeout(true);
     } finally {
       setLoadingBusinesses(false);
     }
-  };
+  }, []);
 
   // Carregar businesses quando o app inicia
   useEffect(() => {
-    fetchBusinesses();
-  }, []);
+    let isMounted = true;
+    
+    const loadBusinesses = async () => {
+      try {
+        await fetchBusinesses();
+      } catch (error) {
+        console.error('Erro ao carregar businesses:', error);
+        if (isMounted) {
+          setLoadingBusinesses(false);
+          setBusinessLoadTimeout(true);
+        }
+      }
+    };
+    
+    loadBusinesses();
+    
+    // Timeout para evitar travamento infinito
+    const timeout = setTimeout(() => {
+      if (isMounted) {
+        setLoadingBusinesses(false);
+        setBusinessLoadTimeout(true);
+      }
+    }, 10000); // 10 segundos
+    
+    return () => {
+      isMounted = false;
+      clearTimeout(timeout);
+    };
+  }, [fetchBusinesses]);
 
   useEffect(() => {
     // Verificar se há um parâmetro de role na URL (após redirect do OAuth)
@@ -2946,29 +3210,34 @@ export default function App() {
         
         // Se for BUSINESS_OWNER, buscar o business do banco
         if (userRole === 'BUSINESS_OWNER' && session.user.id) {
-          const { data: businessData } = await supabase
-            .from('businesses')
-            .select('*')
-            .eq('owner_id', session.user.id)
-            .single();
-          
-          if (businessData) {
-            const biz: Business = {
-              id: businessData.id,
-              name: businessData.name,
-              type: businessData.type as 'BARBERSHOP' | 'SALON',
-              description: businessData.description || '',
-              address: businessData.address || '',
-              image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
-              rating: Number(businessData.rating) || 0,
-              ownerId: businessData.owner_id,
-              monthlyFee: Number(businessData.monthly_fee) || 0,
-              revenueSplit: Number(businessData.revenue_split) || 10,
-              status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
-              gatewayId: businessData.gateway_id,
-              lastPaymentDate: businessData.last_payment_date
-            };
+          try {
+            const { data: businessData, error: businessError } = await supabase
+              .from('businesses')
+              .select('*')
+              .eq('owner_id', session.user.id)
+              .single();
+            
+            if (businessError) {
+              console.error('Erro ao buscar business:', businessError);
+              // Não bloquear o fluxo, apenas logar o erro
+            } else if (businessData) {
+              const biz: Business = {
+                id: businessData.id,
+                name: businessData.name,
+                type: businessData.type as 'BARBERSHOP' | 'SALON',
+                description: businessData.description || '',
+                address: businessData.address || '',
+                image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                rating: Number(businessData.rating) || 0,
+                ownerId: businessData.owner_id,
+                monthlyFee: Number(businessData.monthly_fee) || 0,
+                revenueSplit: Number(businessData.revenue_split) || 10,
+                status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+                gatewayId: businessData.gateway_id,
+                lastPaymentDate: businessData.last_payment_date
+              };
             setUserBusiness(biz);
+            setBusinessLoadTimeout(false); // Reset timeout quando encontrar
             // Atualizar lista de businesses
             setBusinesses(prev => {
               const exists = prev.find(b => b.id === biz.id);
@@ -2977,8 +3246,15 @@ export default function App() {
               }
               return prev.map(b => b.id === biz.id ? biz : b);
             });
+          } else {
+            // Business não encontrado
+            setBusinessLoadTimeout(true);
           }
+        } catch (error) {
+          console.error('Erro ao buscar business:', error);
+          setBusinessLoadTimeout(true); // Marcar timeout em caso de erro
         }
+      }
         
         // Limpar parâmetros da URL
         if (roleParam) {
@@ -2990,47 +3266,66 @@ export default function App() {
     });
     
     // Verificar sessão atual ao carregar
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
+      if (sessionError) {
+        console.error('Erro ao obter sessão:', sessionError);
+        setLoadingBusinesses(false);
+        setBusinessLoadTimeout(true);
+        return;
+      }
+      
       if (session?.user) {
-        const roleParam = new URLSearchParams(window.location.search).get('role');
-        let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
-        let businessId = session.user.user_metadata.business_id;
-        
-        if (roleParam === 'BUSINESS_OWNER' || window.localStorage.getItem('pending_role') === 'BUSINESS_OWNER') {
-          userRole = 'BUSINESS_OWNER';
-          window.localStorage.removeItem('pending_role');
-          if (!businessId) {
-            // Buscar business do banco de dados pelo owner_id
-            const { data: businessData } = await supabase
-              .from('businesses')
-              .select('id')
-              .eq('owner_id', session.user.id)
-              .single();
-            
-            if (businessData) {
-              businessId = businessData.id;
+        try {
+          const roleParam = new URLSearchParams(window.location.search).get('role');
+          let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
+          let businessId = session.user.user_metadata.business_id;
+          
+          if (roleParam === 'BUSINESS_OWNER' || window.localStorage.getItem('pending_role') === 'BUSINESS_OWNER') {
+            userRole = 'BUSINESS_OWNER';
+            window.localStorage.removeItem('pending_role');
+            if (!businessId) {
+              // Buscar business do banco de dados pelo owner_id
+              try {
+                const { data: businessData, error: businessError } = await supabase
+                  .from('businesses')
+                  .select('id')
+                  .eq('owner_id', session.user.id)
+                  .single();
+                
+                if (businessError) {
+                  console.error('Erro ao buscar business no getSession:', businessError);
+                  // Não bloquear, apenas logar
+                } else if (businessData) {
+                  businessId = businessData.id;
+                }
+              } catch (error) {
+                console.error('Erro ao buscar business:', error);
+              }
             }
           }
-        }
-        
-        setUser({
-          id: session.user.id,
-          name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
-          email: session.user.email || '',
-          role: userRole,
-          avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
-          businessId: businessId
-        });
-        
-        // Se for BUSINESS_OWNER, buscar o business do banco
-        if (userRole === 'BUSINESS_OWNER' && session.user.id) {
-          supabase
-            .from('businesses')
-            .select('*')
-            .eq('owner_id', session.user.id)
-            .single()
-            .then(({ data: businessData, error }) => {
-              if (!error && businessData) {
+          
+          setUser({
+            id: session.user.id,
+            name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
+            email: session.user.email || '',
+            role: userRole,
+            avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
+            businessId: businessId
+          });
+          
+          // Se for BUSINESS_OWNER, buscar o business completo do banco
+          if (userRole === 'BUSINESS_OWNER' && session.user.id) {
+            try {
+              const { data: businessData, error: businessError } = await supabase
+                .from('businesses')
+                .select('*')
+                .eq('owner_id', session.user.id)
+                .single();
+              
+              if (businessError) {
+                console.error('Erro ao buscar business completo:', businessError);
+                setBusinessLoadTimeout(true);
+              } else if (businessData) {
                 const biz: Business = {
                   id: businessData.id,
                   name: businessData.name,
@@ -3047,6 +3342,56 @@ export default function App() {
                   lastPaymentDate: businessData.last_payment_date
                 };
                 setUserBusiness(biz);
+                setBusinessLoadTimeout(false);
+                setBusinesses(prev => {
+                  const exists = prev.find(b => b.id === biz.id);
+                  if (!exists) {
+                    return [...prev, biz];
+                  }
+                  return prev.map(b => b.id === biz.id ? biz : b);
+                });
+              } else {
+                setBusinessLoadTimeout(true);
+              }
+            } catch (error) {
+              console.error('Erro ao buscar business completo:', error);
+              setBusinessLoadTimeout(true);
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao processar sessão:', error);
+          setBusinessLoadTimeout(true);
+        }
+        
+        // Se for BUSINESS_OWNER, buscar o business do banco
+        if (userRole === 'BUSINESS_OWNER' && session.user.id) {
+          supabase
+            .from('businesses')
+            .select('*')
+            .eq('owner_id', session.user.id)
+            .single()
+            .then(({ data: businessData, error }) => {
+              if (error) {
+                console.error('Erro ao buscar business:', error);
+                // Não bloquear o fluxo
+              } else if (businessData) {
+                const biz: Business = {
+                  id: businessData.id,
+                  name: businessData.name,
+                  type: businessData.type as 'BARBERSHOP' | 'SALON',
+                  description: businessData.description || '',
+                  address: businessData.address || '',
+                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                  rating: Number(businessData.rating) || 0,
+                  ownerId: businessData.owner_id,
+                  monthlyFee: Number(businessData.monthly_fee) || 0,
+                  revenueSplit: Number(businessData.revenue_split) || 10,
+                  status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+                  gatewayId: businessData.gateway_id,
+                  lastPaymentDate: businessData.last_payment_date
+                };
+                setUserBusiness(biz);
+                setBusinessLoadTimeout(false); // Reset timeout quando encontrar
                 // Atualizar lista de businesses
                 setBusinesses(prev => {
                   const exists = prev.find(b => b.id === biz.id);
@@ -3055,10 +3400,25 @@ export default function App() {
                   }
                   return prev.map(b => b.id === biz.id ? biz : b);
                 });
+              } else {
+                // Business não encontrado
+                setBusinessLoadTimeout(true);
               }
+            })
+            .catch((error) => {
+              console.error('Erro ao buscar business:', error);
+              setBusinessLoadTimeout(true); // Marcar timeout em caso de erro
             });
         }
+      } else {
+        // Sem sessão, garantir que estados estão limpos
+        setUser(null);
+        setLoadingBusinesses(false);
       }
+    }).catch((error) => {
+      console.error('Erro ao obter sessão:', error);
+      setLoadingBusinesses(false);
+      setBusinessLoadTimeout(true);
     });
   }, []);
 
@@ -3285,29 +3645,161 @@ export default function App() {
       // Usar userBusiness se disponível, senão buscar na lista
       const biz = userBusiness || businesses.find(b => b.ownerId === user.id || b.id === user.businessId);
       
-      if (!biz) {
+      // Debug: log para verificar estado
+      if (process.env.NODE_ENV === 'development') {
+        console.log('BUSINESS_OWNER render:', {
+          hasUserBusiness: !!userBusiness,
+          businessesCount: businesses.length,
+          loadingBusinesses,
+          businessLoadTimeout,
+          hasBiz: !!biz,
+          userId: user.id,
+          userBusinessId: user.businessId
+        });
+      }
+      
+      // Se não encontrou o business e ainda está carregando (mas não passou do timeout), mostrar loading
+      if (!biz && loadingBusinesses && !businessLoadTimeout) {
         return (
-          <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+          <div className="flex items-center justify-center min-h-[calc(100vh-64px)] bg-slate-50">
             <div className="text-center">
+              <RefreshCw className="animate-spin text-indigo-600 mx-auto mb-4" size={48} />
               <p className="text-slate-600 font-semibold">Carregando estabelecimento...</p>
+              <p className="text-slate-400 text-sm mt-2">Aguarde alguns instantes...</p>
             </div>
           </div>
         );
       }
       
-      return (
+      // Se não encontrou o business após carregar ou timeout, mostrar erro
+      if (!biz && (!loadingBusinesses || businessLoadTimeout)) {
+        return (
+          <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+            <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
+              <AlertCircle className="text-red-500 mx-auto mb-4" size={48} />
+              <h3 className="text-2xl font-black text-slate-900 mb-2">Estabelecimento não encontrado</h3>
+              <p className="text-slate-600 mb-6">
+                Não foi possível encontrar um estabelecimento associado à sua conta.
+              </p>
+              <div className="space-y-3">
+                <button
+                  onClick={async () => {
+                    // Resetar estados
+                    setBusinessLoadTimeout(false);
+                    setLoadingBusinesses(true);
+                    
+                    // Tentar buscar novamente
+                    if (user.id) {
+                      try {
+                        const { data: businessData, error: businessError } = await supabase
+                          .from('businesses')
+                          .select('*')
+                          .eq('owner_id', user.id)
+                          .single();
+                        
+                        if (businessError) {
+                          console.error('Erro ao buscar business:', businessError);
+                          addToast('Erro ao buscar estabelecimento. Verifique sua conexão.', 'error');
+                          setLoadingBusinesses(false);
+                          setBusinessLoadTimeout(true);
+                          return;
+                        }
+                        
+                        if (businessData) {
+                          const biz: Business = {
+                            id: businessData.id,
+                            name: businessData.name,
+                            type: businessData.type as 'BARBERSHOP' | 'SALON',
+                            description: businessData.description || '',
+                            address: businessData.address || '',
+                            image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                            rating: Number(businessData.rating) || 0,
+                            ownerId: businessData.owner_id,
+                            monthlyFee: Number(businessData.monthly_fee) || 0,
+                            revenueSplit: Number(businessData.revenue_split) || 10,
+                            status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+                            gatewayId: businessData.gateway_id,
+                            lastPaymentDate: businessData.last_payment_date
+                          };
+                          setUserBusiness(biz);
+                          setBusinessLoadTimeout(false);
+                          setBusinesses(prev => {
+                            const exists = prev.find(b => b.id === biz.id);
+                            if (!exists) {
+                              return [...prev, biz];
+                            }
+                            return prev.map(b => b.id === biz.id ? biz : b);
+                          });
+                          addToast('Estabelecimento carregado com sucesso!', 'success');
+                        } else {
+                          addToast('Estabelecimento não encontrado. Entre em contato com o suporte.', 'error');
+                          setLoadingBusinesses(false);
+                          setBusinessLoadTimeout(true);
+                        }
+                      } catch (error: any) {
+                        console.error('Erro ao buscar business:', error);
+                        addToast('Erro ao buscar estabelecimento. Tente novamente.', 'error');
+                        setLoadingBusinesses(false);
+                        setBusinessLoadTimeout(true);
+                      }
+                    }
+                  }}
+                  className="w-full px-6 py-3 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition-all"
+                >
+                  Tentar Novamente
+                </button>
+                <button
+                  onClick={() => {
+                    // Fazer logout
+                    handleLogout();
+                  }}
+                  className="w-full px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-black hover:bg-slate-200 transition-all"
+                >
+                  Fazer Logout
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      }
+      
+      // Se encontrou o business, renderizar o dashboard
+      if (biz) {
+        return (
         <BusinessOwnerDashboard 
           business={biz} 
           collaborators={collaborators} 
-          products={products} 
+          products={products}
+          services={services}
           appointments={appointments}
           setCollaborators={setCollaborators}
           setProducts={setProducts}
+          setServices={setServices}
           setAppointments={setAppointments}
           addToast={addToast}
           setBusinesses={setBusinesses}
           businesses={businesses}
         />
+        );
+      }
+      
+      // Fallback: se chegou aqui sem business e sem estar em loading/timeout, mostrar erro
+      return (
+        <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+          <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
+            <AlertCircle className="text-red-500 mx-auto mb-4" size={48} />
+            <h3 className="text-2xl font-black text-slate-900 mb-2">Erro inesperado</h3>
+            <p className="text-slate-600 mb-6">
+              Ocorreu um erro ao carregar o estabelecimento. Tente fazer logout e login novamente.
+            </p>
+            <button
+              onClick={() => handleLogout()}
+              className="w-full px-6 py-3 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition-all"
+            >
+              Fazer Logout
+            </button>
+          </div>
+        </div>
       );
     }
 

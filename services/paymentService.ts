@@ -2,6 +2,36 @@ import { supabase } from '../lib/supabase';
 import { PaymentRequest, PixPaymentResponse, CreditCardPaymentResponse } from '../types';
 
 /**
+ * Verifica o status de um pagamento PIX
+ * @param paymentId ID do pagamento retornado pelo Mercado Pago
+ * @returns Status do pagamento
+ */
+export async function verificarStatusPagamento(
+  paymentId: number
+): Promise<{ status: string; approved: boolean }> {
+  try {
+    const { data, error } = await supabase.functions.invoke('checkPaymentStatus', {
+      body: { payment_id: paymentId },
+    });
+
+    if (error) {
+      throw new Error(error.message || 'Erro ao verificar status do pagamento');
+    }
+
+    return {
+      status: data.status || 'pending',
+      approved: data.status === 'approved',
+    };
+  } catch (error: any) {
+    console.error('Erro ao verificar status do pagamento:', error);
+    return {
+      status: 'error',
+      approved: false,
+    };
+  }
+}
+
+/**
  * Cria um pagamento PIX via Mercado Pago
  * @param valor Valor do pagamento em reais
  * @param email Email do cliente

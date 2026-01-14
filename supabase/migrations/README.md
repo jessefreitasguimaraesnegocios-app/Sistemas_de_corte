@@ -16,6 +16,7 @@ Execute as migrações na seguinte ordem:
 8. **008_setup_existing_businesses.sql** - Setup manual para businesses existentes (opcional)
 9. **009_create_user_profiles.sql** - Tabela de perfis de usuários ⭐ NOVO
 10. **010_allow_super_admin_create_businesses.sql** - Permite que SUPER_ADMIN crie businesses ⭐ NOVO
+11. **011_create_services_table.sql** - Tabela de serviços oferecidos pelos estabelecimentos ⭐ NOVO
 
 ## Como Aplicar as Migrações
 
@@ -62,6 +63,7 @@ psql -h db.seu-projeto.supabase.co -U postgres -d postgres
 \i supabase/migrations/008_setup_existing_businesses.sql
 \i supabase/migrations/009_create_user_profiles.sql
 \i supabase/migrations/010_allow_super_admin_create_businesses.sql
+\i supabase/migrations/011_create_services_table.sql
 ```
 
 ## Estrutura das Tabelas
@@ -93,6 +95,19 @@ Armazena perfis de usuários que complementam auth.users.
 - `is_active`: Status ativo/inativo
 - `last_login`: Último login
 - `metadata`: Dados adicionais em JSON
+
+### services
+Armazena serviços oferecidos pelos estabelecimentos (cortes, pinturas, etc.).
+
+**Campos principais:**
+- `id`: UUID único
+- `business_id`: ID do negócio que oferece o serviço
+- `name`: Nome do serviço
+- `price`: Preço em reais
+- `duration`: Duração em minutos
+- `description`: Descrição detalhada (opcional)
+- `category`: Categoria do serviço (opcional)
+- `is_active`: Indica se o serviço está ativo
 
 ## Funções Úteis
 
