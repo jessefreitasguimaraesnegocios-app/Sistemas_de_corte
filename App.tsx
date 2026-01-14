@@ -68,12 +68,20 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
 
 // --- COMPONENTS ---
 
-const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart }: any) => (
+const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, isMenuOpen }: any) => (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-50">
     <div className="flex items-center gap-4">
       {onBack && (
         <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
           <ArrowLeft size={20} className="text-slate-600" />
+        </button>
+      )}
+      {user?.role === 'SUPER_ADMIN' && !onBack && (
+        <button 
+          onClick={onMenuToggle}
+          className="lg:hidden p-2 hover:bg-slate-100 rounded-lg transition-colors"
+        >
+          <Menu size={24} className="text-slate-600" />
         </button>
       )}
       <div className="flex items-center gap-2 font-bold text-xl text-indigo-600 cursor-pointer" onClick={onBack}>
@@ -1298,6 +1306,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [autoApprove, setAutoApprove] = useState(true);
+  const [showAuditLogs, setShowAuditLogs] = useState(false);
 
   const handleAddPartner = async () => {
     setLoading(true);
@@ -1366,6 +1375,22 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
     addToast('Abrindo logs do sistema...', 'success');
     // Aqui você abriria um modal com logs ou redirecionaria
   };
+
+  const handleAuditLogs = () => {
+    setShowAuditLogs(true);
+  };
+
+  // Dados de exemplo de audit logs (em produção, buscar do banco de dados)
+  const auditLogs = [
+    { id: 1, timestamp: new Date().toISOString(), user: 'SUPER_ADMIN', action: 'CREATE_BUSINESS', target: 'Barbearia Elite', status: 'SUCCESS', details: 'Novo parceiro cadastrado' },
+    { id: 2, timestamp: new Date(Date.now() - 3600000).toISOString(), user: 'SUPER_ADMIN', action: 'UPDATE_BUSINESS', target: 'Salão Beleza', status: 'SUCCESS', details: 'Configurações atualizadas' },
+    { id: 3, timestamp: new Date(Date.now() - 7200000).toISOString(), user: 'SUPER_ADMIN', action: 'PAUSE_BUSINESS', target: 'Barbearia Moderna', status: 'SUCCESS', details: 'Estabelecimento pausado' },
+    { id: 4, timestamp: new Date(Date.now() - 10800000).toISOString(), user: 'SUPER_ADMIN', action: 'UPDATE_SETTINGS', target: 'Plataforma', status: 'SUCCESS', details: 'Taxa de split atualizada para 12%' },
+    { id: 5, timestamp: new Date(Date.now() - 14400000).toISOString(), user: 'SUPER_ADMIN', action: 'BACKUP', target: 'Database', status: 'SUCCESS', details: 'Backup completo gerado' },
+    { id: 6, timestamp: new Date(Date.now() - 18000000).toISOString(), user: 'SUPER_ADMIN', action: 'SYNC_DATA', target: 'Supabase', status: 'SUCCESS', details: 'Dados sincronizados' },
+    { id: 7, timestamp: new Date(Date.now() - 21600000).toISOString(), user: 'SUPER_ADMIN', action: 'DELETE_BUSINESS', target: 'Estabelecimento Teste', status: 'SUCCESS', details: 'Parceiro removido da plataforma' },
+    { id: 8, timestamp: new Date(Date.now() - 25200000).toISOString(), user: 'SUPER_ADMIN', action: 'UPDATE_WEBHOOK', target: 'Mercado Pago', status: 'SUCCESS', details: 'Webhook URL atualizada' },
+  ];
 
   const handleConfirmPauseAction = () => {
     if (!confirmPauseModal.business) return;
@@ -1791,7 +1816,12 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
                       <div className="flex justify-between items-center text-xs font-bold"><span>Database Engine</span><span className="text-green-400 flex items-center gap-1"><div className="w-1.5 h-1.5 bg-green-500 rounded-full" /> ONLINE</span></div>
                       <div className="flex justify-between items-center text-xs font-bold"><span>Realtime Sync</span><span className="text-green-400 flex items-center gap-1"><div className="w-1.5 h-1.5 bg-green-500 rounded-full" /> ONLINE</span></div>
                    </div>
-                   <button className="w-full bg-indigo-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-900/40">Audit Logs</button>
+                   <button 
+                     onClick={handleAuditLogs}
+                     className="w-full bg-indigo-600 py-4 rounded-2xl font-black text-xs uppercase tracking-widest shadow-xl shadow-indigo-900/40 hover:bg-indigo-700 transition-all"
+                   >
+                     Audit Logs
+                   </button>
                 </div>
              </div>
           </div>
@@ -2181,6 +2211,88 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
           </div>
         </div>
       )}
+
+      {/* Modal de Audit Logs */}
+      {showAuditLogs && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-4xl p-10 shadow-2xl animate-in zoom-in-95 duration-200 max-h-[90vh] overflow-hidden flex flex-col">
+            <div className="flex justify-between items-center mb-8">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900">Audit Logs</h3>
+                <p className="text-sm text-slate-500 mt-1">Registro de todas as ações administrativas</p>
+              </div>
+              <button 
+                onClick={() => setShowAuditLogs(false)}
+                className="text-slate-700 hover:text-slate-900 transition-colors p-2 hover:bg-slate-100 rounded-full"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-2">
+              <div className="space-y-3">
+                {auditLogs.map((log) => {
+                  const logDate = new Date(log.timestamp);
+                  const timeAgo = Math.floor((Date.now() - logDate.getTime()) / 60000);
+                  const timeAgoText = timeAgo < 60 
+                    ? `${timeAgo} min atrás` 
+                    : timeAgo < 1440 
+                    ? `${Math.floor(timeAgo / 60)} h atrás`
+                    : `${Math.floor(timeAgo / 1440)} dias atrás`;
+
+                  return (
+                    <div 
+                      key={log.id} 
+                      className="bg-slate-50 border border-slate-200 rounded-2xl p-6 hover:bg-slate-100 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2">
+                            <div className={`w-2 h-2 rounded-full ${
+                              log.status === 'SUCCESS' ? 'bg-green-500' : 
+                              log.status === 'ERROR' ? 'bg-red-500' : 
+                              'bg-amber-500'
+                            }`}></div>
+                            <span className="font-black text-slate-900">{log.action.replace(/_/g, ' ')}</span>
+                            <span className="text-xs font-bold text-slate-400 bg-slate-200 px-2 py-1 rounded-full">
+                              {log.user}
+                            </span>
+                          </div>
+                          <p className="text-sm text-slate-700 font-medium mb-1">
+                            <span className="font-black">Target:</span> {log.target}
+                          </p>
+                          <p className="text-xs text-slate-500">{log.details}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xs font-bold text-slate-400 mb-1">{timeAgoText}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">
+                            {logDate.toLocaleString('pt-BR')}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="mt-6 pt-6 border-t border-slate-200 flex justify-between items-center">
+              <p className="text-xs text-slate-500">
+                Total de {auditLogs.length} registros
+              </p>
+              <button
+                onClick={() => {
+                  addToast('Exportando logs...', 'success');
+                  // Aqui você implementaria a exportação
+                }}
+                className="px-6 py-3 bg-slate-900 text-white rounded-xl font-black text-sm hover:bg-indigo-600 transition-all"
+              >
+                Exportar CSV
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -2206,6 +2318,7 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [activeTab, setActiveTab] = useState('DASHBOARD');
   const [selectedBusiness, setSelectedBusiness] = useState<Business | null>(null);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [businesses, setBusinesses] = useState<Business[]>(INITIAL_BUSINESSES);
   const [collaborators, setCollaborators] = useState<Collaborator[]>(INITIAL_COLLABORATORS);
   const [services, setServices] = useState<Service[]>(INITIAL_SERVICES);
@@ -2524,7 +2637,76 @@ export default function App() {
         onBack={selectedBusiness ? () => setSelectedBusiness(null) : undefined} 
         cartCount={totalCartItems} 
         onOpenCart={() => setIsCartOpen(true)}
+        onMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+        isMenuOpen={isMobileMenuOpen}
       />
+      
+      {/* Menu Mobile - Aparece abaixo da navbar em telas pequenas */}
+      {user?.role === 'SUPER_ADMIN' && !selectedBusiness && (
+        <div className={`lg:hidden bg-white border-b border-slate-200 transition-all duration-300 overflow-hidden ${
+          isMobileMenuOpen ? 'max-h-96 opacity-100' : 'max-h-0 opacity-0'
+        }`}>
+          <nav className="px-4 py-4 space-y-1">
+            <button 
+              onClick={() => {
+                setActiveTab('DASHBOARD');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-4 py-3 font-bold text-sm rounded-xl transition-all ${
+                activeTab === 'DASHBOARD'
+                  ? 'bg-indigo-50 text-indigo-600' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <LayoutGrid size={20} />
+              Dashboard Hub
+            </button>
+            <button 
+              onClick={() => {
+                setActiveTab('PARTNERS');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-4 py-3 font-bold text-sm rounded-xl transition-all ${
+                activeTab === 'PARTNERS'
+                  ? 'bg-indigo-50 text-indigo-600' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <Users size={20} />
+              Parceiros Ativos
+            </button>
+            <button 
+              onClick={() => {
+                setActiveTab('FINANCE');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-4 py-3 font-bold text-sm rounded-xl transition-all ${
+                activeTab === 'FINANCE'
+                  ? 'bg-indigo-50 text-indigo-600' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <DollarSign size={20} />
+              Split Financeiro
+            </button>
+            <button 
+              onClick={() => {
+                setActiveTab('SETTINGS');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-4 py-3 font-bold text-sm rounded-xl transition-all ${
+                activeTab === 'SETTINGS'
+                  ? 'bg-indigo-50 text-indigo-600' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <Settings size={20} />
+              Configurações Hub
+            </button>
+          </nav>
+        </div>
+      )}
+
       <div className="flex flex-1 relative overflow-hidden">
         {user?.role === 'SUPER_ADMIN' && !selectedBusiness && (
           <aside className="hidden lg:flex flex-col w-72 bg-white border-r border-slate-200 sticky top-16 h-[calc(100vh-64px)] py-10">
