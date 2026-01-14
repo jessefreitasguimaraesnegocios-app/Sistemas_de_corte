@@ -119,6 +119,9 @@ serve(async (req: Request) => {
 
     // Buscar informações do negócio, incluindo o Access Token do Mercado Pago
     console.log("Buscando business com ID:", business_id);
+    console.log("SUPABASE_URL:", SUPABASE_URL ? "Configurado" : "NÃO CONFIGURADO");
+    console.log("SUPABASE_SERVICE_ROLE_KEY:", SUPABASE_SERVICE_ROLE_KEY ? "Configurado" : "NÃO CONFIGURADO");
+    
     const { data: business, error: businessError } = await supabase
       .from("businesses")
       .select("id, name, mp_access_token, revenue_split, status")
@@ -127,10 +130,13 @@ serve(async (req: Request) => {
 
     if (businessError) {
       console.error("Erro ao buscar business:", businessError);
+      console.error("Detalhes do erro:", JSON.stringify(businessError, null, 2));
       return new Response(
         JSON.stringify({ 
           error: "Erro ao buscar negócio no banco de dados", 
           details: businessError.message,
+          code: businessError.code,
+          hint: businessError.hint,
           business_id: business_id 
         }),
         { 
@@ -142,6 +148,13 @@ serve(async (req: Request) => {
 
     if (!business) {
       console.error("Business não encontrado com ID:", business_id);
+      // Tentar buscar sem .single() para ver se existe
+      const { data: allBusinesses } = await supabase
+        .from("businesses")
+        .select("id, name, status")
+        .limit(5);
+      console.log("Businesses disponíveis (primeiros 5):", allBusinesses);
+      
       return new Response(
         JSON.stringify({ 
           error: "Negócio não encontrado no banco de dados", 
@@ -155,7 +168,14 @@ serve(async (req: Request) => {
       );
     }
 
-    console.log("Business encontrado:", { id: business.id, name: business.name, status: business.status, has_token: !!business.mp_access_token });
+    console.log("Business encontrado:", { 
+      id: business.id, 
+      name: business.name, 
+      status: business.status, 
+      has_token: !!business.mp_access_token,
+      token_length: business.mp_access_token ? business.mp_access_token.length : 0,
+      token_preview: business.mp_access_token ? business.mp_access_token.substring(0, 20) + "..." : "null"
+    });
 
     // Verificar se o negócio está ativo
     if (business.status !== "ACTIVE") {

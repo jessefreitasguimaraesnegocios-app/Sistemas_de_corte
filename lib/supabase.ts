@@ -25,7 +25,11 @@ export const supabase = (() => {
   return supabaseInstance;
 })();
 
-export const signInWithGoogle = async (role?: 'BUSINESS_OWNER' | 'CUSTOMER') => {
+export const signInWithGoogle = async (role?: 'BUSINESS_OWNER' | 'CUSTOMER' | 'SUPER_ADMIN') => {
+  if (role) {
+    // usado após redirect para definir o contexto do login
+    window.localStorage.setItem('pending_role', role);
+  }
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {

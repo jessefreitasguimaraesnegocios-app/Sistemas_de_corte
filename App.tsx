@@ -2240,40 +2240,119 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
     });
   };
 
-  const handleSaveBusinessConfig = () => {
+  const handleSaveBusinessConfig = async () => {
     if (!editingBusiness) return;
 
     setLoading(true);
     
-    // Atualizar o negócio na lista
-    const updatedBusinesses = businesses.map((b: Business) => {
-      if (b.id === editingBusiness.id) {
-        return {
-          ...b,
-          name: editForm.name,
-          type: editForm.type,
-          revenueSplit: editForm.revenueSplit,
-          monthlyFee: editForm.monthlyFee,
-          status: editForm.status,
-          description: editForm.description,
-          address: editForm.address,
-          mp_access_token: editForm.mpAccessToken,
-          isPaused: editForm.status === 'SUSPENDED'
-        };
-      }
-      return b;
-    });
+    try {
+      // Preparar dados para atualizar no Supabase
+      // Apenas incluir campos que foram alterados e são válidos
+      const updateData: any = {
+        name: editForm.name || '',
+        type: editForm.type,
+        revenue_split: Number(editForm.revenueSplit) || 10,
+        monthly_fee: Number(editForm.monthlyFee) || 0,
+        status: editForm.status || 'ACTIVE',
+      };
 
-    setBusinesses(updatedBusinesses);
-    
-    // Aqui você salvaria no Supabase
-    // await supabase.from('businesses').update({ ...editForm }).eq('id', editingBusiness.id);
-    
-    setTimeout(() => {
+      // Adicionar campos opcionais apenas se tiverem valor
+      if (editForm.description !== undefined) {
+        updateData.description = editForm.description || null;
+      }
+      if (editForm.address !== undefined) {
+        updateData.address = editForm.address || null;
+      }
+      // mp_access_token - sempre incluir, mesmo se vazio (para permitir limpar o token)
+      // Garantir que string vazia vira null (PostgreSQL trata melhor null)
+      let tokenValue = editForm.mpAccessToken?.trim();
+      if (tokenValue === '' || !tokenValue) {
+        tokenValue = null;
+      }
+      updateData.mp_access_token = tokenValue;
+      
+      // Log para debug - mostrar exatamente o que será enviado
+      console.log('💾 Salvando configurações do business:', {
+        business_id: editingBusiness.id,
+        business_name: editForm.name,
+        mp_access_token_raw: editForm.mpAccessToken,
+        mp_access_token_trimmed: tokenValue ? `${tokenValue.substring(0, 20)}...` : 'null',
+        token_length: tokenValue?.length || 0,
+        token_type: typeof tokenValue,
+        updateData_keys: Object.keys(updateData),
+        updateData_mp_token: updateData.mp_access_token ? 'PRESENTE' : 'NULL',
+        updateData_full: JSON.stringify(updateData).substring(0, 200) + '...'
+      });
+
+      // Atualizar no Supabase via Edge Function (bypass RLS)
+      // IMPORTANT: passar Authorization explicitamente (evita 401 quando o invoke não envia o JWT)
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (sessionError || !accessToken) {
+        console.error('❌ Sem sessão/Access Token para chamar updateBusinessConfig:', sessionError);
+        addToast('Sessão expirada. Faça login novamente e tente salvar.', 'error');
+        setLoading(false);
+        return;
+      }
+
+      const { data: fnData, error: fnError } = await supabase.functions.invoke('updateBusinessConfig', {
+        body: {
+          business_id: editingBusiness.id,
+          update: updateData,
+        },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      });
+
+      if (fnError) {
+        console.error('❌ Erro ao salvar via Edge Function updateBusinessConfig:', fnError);
+        console.error('Detalhes do erro:', JSON.stringify(fnError, null, 2));
+        addToast(`Erro ao salvar: ${fnError.message || 'Falha ao salvar no servidor'}`, 'error');
+        setLoading(false);
+        return;
+      }
+
+      console.log('✅ updateBusinessConfig OK:', fnData);
+
+      // Se quiser confirmar no banco via SELECT, pode continuar usando o verify abaixo,
+      // mas o retorno da função já traz has_token/token_length.
+      const hasToken = !!fnData?.business?.has_token;
+      if (tokenValue && !hasToken) {
+        console.warn('⚠️ ATENÇÃO: Token foi enviado mas a função retornou has_token=false');
+        addToast('Token não foi confirmado no banco. Verifique as permissões/políticas.', 'error');
+      }
+
+      // Atualizar o negócio na lista local
+      const updatedBusinesses = businesses.map((b: Business) => {
+        if (b.id === editingBusiness.id) {
+          return {
+            ...b,
+            name: editForm.name,
+            type: editForm.type,
+            revenueSplit: editForm.revenueSplit,
+            monthlyFee: editForm.monthlyFee,
+            status: editForm.status,
+            description: editForm.description,
+            address: editForm.address,
+            mp_access_token: editForm.mpAccessToken,
+            isPaused: editForm.status === 'SUSPENDED'
+          };
+        }
+        return b;
+      });
+
+      setBusinesses(updatedBusinesses);
+      
       setLoading(false);
       setEditingBusiness(null);
       addToast(`Configurações de ${editForm.name} salvas com sucesso!`, 'success');
-    }, 1000);
+    } catch (err: any) {
+      console.error('Erro ao salvar configurações:', err);
+      addToast(`Erro ao salvar: ${err.message || 'Erro desconhecido'}`, 'error');
+      setLoading(false);
+    }
   };
 
   const renderTabContent = () => {
@@ -3405,9 +3484,11 @@ export default function App() {
           revenueSplit: Number(b.revenue_split) || 10,
           status: b.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
           gatewayId: b.gateway_id,
-          lastPaymentDate: b.last_payment_date
-        }));
-        setBusinesses(businessesData);
+          lastPaymentDate: b.last_payment_date,
+          // Preservar mp_access_token para uso no formulário de edição
+          mp_access_token: b.mp_access_token || null
+        } as Business & { mp_access_token?: string | null }));
+        setBusinesses(businessesData as any);
         setBusinessLoadTimeout(false);
       } else {
         // Se não houver dados, usar dados iniciais como fallback
@@ -3483,6 +3564,18 @@ export default function App() {
             }
           }
         }
+
+        // Se veio do login de admin, definir como SUPER_ADMIN
+        if (roleParam === 'SUPER_ADMIN' || window.localStorage.getItem('pending_role') === 'SUPER_ADMIN') {
+          userRole = 'SUPER_ADMIN';
+          window.localStorage.removeItem('pending_role');
+          // Persistir role no metadata para o trigger atualizar user_profiles.role
+          try {
+            await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
+          } catch (e) {
+            console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
+          }
+        }
         
         setUser({
           id: session.user.id,
@@ -3506,7 +3599,7 @@ export default function App() {
               console.error('Erro ao buscar business:', businessError);
               // Não bloquear o fluxo, apenas logar o erro
             } else if (businessData) {
-              const biz: Business = {
+              const biz: Business & { mp_access_token?: string | null } = {
                 id: businessData.id,
                 name: businessData.name,
                 type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -3519,9 +3612,10 @@ export default function App() {
                 revenueSplit: Number(businessData.revenue_split) || 10,
                 status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                 gatewayId: businessData.gateway_id,
-                lastPaymentDate: businessData.last_payment_date
+                lastPaymentDate: businessData.last_payment_date,
+                mp_access_token: businessData.mp_access_token || null
               };
-            setUserBusiness(biz);
+            setUserBusiness(biz as Business);
             setBusinessLoadTimeout(false); // Reset timeout quando encontrar
             // Atualizar lista de businesses
             setBusinesses(prev => {
@@ -3588,6 +3682,16 @@ export default function App() {
               }
             }
           }
+
+          if (roleParam === 'SUPER_ADMIN' || window.localStorage.getItem('pending_role') === 'SUPER_ADMIN') {
+            userRole = 'SUPER_ADMIN';
+            window.localStorage.removeItem('pending_role');
+            try {
+              await supabase.auth.updateUser({ data: { role: 'SUPER_ADMIN' } });
+            } catch (e) {
+              console.warn('Não foi possível atualizar metadata role para SUPER_ADMIN:', e);
+            }
+          }
           
           setUser({
             id: session.user.id,
@@ -3611,7 +3715,7 @@ export default function App() {
                 console.error('Erro ao buscar business completo:', businessError);
                 setBusinessLoadTimeout(true);
               } else if (businessData) {
-                const biz: Business = {
+                const biz: Business & { mp_access_token?: string | null } = {
                   id: businessData.id,
                   name: businessData.name,
                   type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -3624,16 +3728,17 @@ export default function App() {
                   revenueSplit: Number(businessData.revenue_split) || 10,
                   status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                   gatewayId: businessData.gateway_id,
-                  lastPaymentDate: businessData.last_payment_date
+                  lastPaymentDate: businessData.last_payment_date,
+                  mp_access_token: businessData.mp_access_token || null
                 };
-                setUserBusiness(biz);
+                setUserBusiness(biz as Business);
                 setBusinessLoadTimeout(false);
                 setBusinesses(prev => {
                   const exists = prev.find(b => b.id === biz.id);
                   if (!exists) {
-                    return [...prev, biz];
+                    return [...prev, biz as Business];
                   }
-                  return prev.map(b => b.id === biz.id ? biz : b);
+                  return prev.map(b => b.id === biz.id ? (biz as Business) : b);
                 });
               } else {
                 setBusinessLoadTimeout(true);
@@ -3660,7 +3765,7 @@ export default function App() {
                 console.error('Erro ao buscar business:', error);
                 // Não bloquear o fluxo
               } else if (businessData) {
-                const biz: Business = {
+                const biz: Business & { mp_access_token?: string | null } = {
                   id: businessData.id,
                   name: businessData.name,
                   type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -3673,9 +3778,10 @@ export default function App() {
                   revenueSplit: Number(businessData.revenue_split) || 10,
                   status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                   gatewayId: businessData.gateway_id,
-                  lastPaymentDate: businessData.last_payment_date
+                  lastPaymentDate: businessData.last_payment_date,
+                  mp_access_token: businessData.mp_access_token || null
                 };
-                setUserBusiness(biz);
+                setUserBusiness(biz as Business);
                 setBusinessLoadTimeout(false); // Reset timeout quando encontrar
                 // Atualizar lista de businesses
                 setBusinesses(prev => {
@@ -3904,7 +4010,20 @@ export default function App() {
                   >
                     Sou Estabelecimento
                   </button>
-                  <button onClick={() => mockLogin('SUPER_ADMIN')} className="bg-white border-2 border-slate-200 p-4 rounded-2xl font-black text-xs text-slate-900 hover:bg-slate-900 hover:border-slate-900 hover:text-white transition-all active:scale-95 shadow-sm hover:shadow-md">Admin Central</button>
+                  <button
+                    onClick={async () => {
+                      try {
+                        // Admin precisa de sessão real do Supabase (para salvar token via Edge Function)
+                        await signInWithGoogle('SUPER_ADMIN');
+                      } catch (error: any) {
+                        console.error('Erro ao fazer login admin com Google:', error);
+                        addToast('Erro ao fazer login admin. Verifique o Google OAuth.', 'error');
+                      }
+                    }}
+                    className="bg-white border-2 border-slate-200 p-4 rounded-2xl font-black text-xs text-slate-900 hover:bg-slate-900 hover:border-slate-900 hover:text-white transition-all active:scale-95 shadow-sm hover:shadow-md"
+                  >
+                    Admin Central
+                  </button>
                 </div>
                 <button 
                   onClick={async () => {
@@ -4015,7 +4134,7 @@ export default function App() {
                         }
                         
                         if (businessData) {
-                          const biz: Business = {
+                          const biz: Business & { mp_access_token?: string | null } = {
                             id: businessData.id,
                             name: businessData.name,
                             type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -4028,9 +4147,10 @@ export default function App() {
                             revenueSplit: Number(businessData.revenue_split) || 10,
                             status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                             gatewayId: businessData.gateway_id,
-                            lastPaymentDate: businessData.last_payment_date
+                            lastPaymentDate: businessData.last_payment_date,
+                            mp_access_token: businessData.mp_access_token || null
                           };
-                          setUserBusiness(biz);
+                          setUserBusiness(biz as Business);
                           setBusinessLoadTimeout(false);
                           setBusinesses(prev => {
                             const exists = prev.find(b => b.id === biz.id);

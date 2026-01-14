@@ -57,37 +57,85 @@ export async function criarPagamentoPix(
       throw new Error('Valor inválido. O valor deve ser maior que zero.');
     }
 
-    const { data, error } = await supabase.functions.invoke('createPayment', {
-      body: {
-        valor,
-        metodo_pagamento: 'pix',
-        email_cliente: email,
-        business_id: businessId,
-        referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      } as PaymentRequest,
-    });
+    let responseData: any;
+    let responseError: any;
+    
+    try {
+      const result = await supabase.functions.invoke('createPayment', {
+        body: {
+          valor,
+          metodo_pagamento: 'pix',
+          email_cliente: email,
+          business_id: businessId,
+          referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        } as PaymentRequest,
+      });
+      
+      responseData = result.data;
+      responseError = result.error;
+    } catch (invokeError: any) {
+      // Capturar erro de invocação (pode ocorrer quando status não é 2xx)
+      console.error('Erro ao invocar Edge Function:', invokeError);
+      responseError = invokeError;
+      
+      // Tentar extrair dados do erro se disponível
+      if (invokeError.data) {
+        responseData = invokeError.data;
+      }
+    }
 
-    if (error) {
-      console.error('Erro na Edge Function (error object):', error);
-      // Tentar extrair mensagem de erro mais detalhada
-      const errorMessage = error.message || error.toString() || 'Erro ao criar pagamento PIX';
+    // Se há erro, tentar extrair mensagem detalhada
+    if (responseError) {
+      console.error('Erro na Edge Function:', responseError);
+      console.error('Data recebida (pode conter detalhes do erro):', responseData);
+      
+      let errorMessage = 'Erro ao criar pagamento PIX';
+      
+      // Prioridade 1: Mensagem do data (resposta JSON da Edge Function)
+      if (responseData && responseData.error) {
+        errorMessage = responseData.error;
+        if (responseData.details) {
+          const detailsStr = typeof responseData.details === 'string' 
+            ? responseData.details 
+            : JSON.stringify(responseData.details);
+          errorMessage += ` - ${detailsStr}`;
+        }
+        if (responseData.hint) {
+          errorMessage += ` - ${responseData.hint}`;
+        }
+      }
+      // Prioridade 2: Mensagem do objeto error
+      else if (responseError.message) {
+        errorMessage = responseError.message;
+      }
+      // Prioridade 3: Contexto do erro
+      else if (responseError.context && responseError.context.msg) {
+        errorMessage = responseError.context.msg;
+      }
+      // Prioridade 4: String direta
+      else if (typeof responseError === 'string') {
+        errorMessage = responseError;
+      }
+      
       throw new Error(errorMessage);
     }
 
     // Verificar se a resposta contém erro (mesmo com status 200)
-    if (data && data.error) {
-      console.error('Erro na resposta da Edge Function:', data);
-      const errorDetails = data.details ? ` Detalhes: ${JSON.stringify(data.details)}` : '';
-      const errorHint = data.hint ? ` Dica: ${data.hint}` : '';
-      throw new Error(`${data.error}${errorDetails}${errorHint}`);
+    if (responseData && responseData.error) {
+      console.error('Erro na resposta da Edge Function:', responseData);
+      const errorDetails = responseData.details 
+        ? (typeof responseData.details === 'string' ? responseData.details : JSON.stringify(responseData.details))
+        : '';
+      const errorHint = responseData.hint ? ` Dica: ${responseData.hint}` : '';
+      throw new Error(`${responseData.error}${errorDetails ? ` - ${errorDetails}` : ''}${errorHint}`);
     }
 
-    if (!data || !data.success) {
-      console.error('Resposta sem sucesso da Edge Function:', data);
-      throw new Error(data?.error || 'Falha ao processar pagamento PIX');
+    if (!responseData || !responseData.success) {
+      console.error('Resposta sem sucesso da Edge Function:', responseData);
+      throw new Error(responseData?.error || 'Falha ao processar pagamento PIX');
     }
 
-    return data as PixPaymentResponse;
+    return responseData as PixPaymentResponse;
   } catch (error: any) {
     console.error('Erro ao criar pagamento PIX:', error);
     return {
@@ -120,26 +168,76 @@ export async function criarPagamentoCartao(
       throw new Error('Token do cartão é obrigatório');
     }
 
-    const { data, error } = await supabase.functions.invoke('createPayment', {
-      body: {
-        valor,
-        metodo_pagamento: 'credit_card',
-        email_cliente: email,
-        token_cartao: tokenCartao,
-        business_id: businessId,
-        referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      } as PaymentRequest,
-    });
-
-    if (error) {
-      throw new Error(error.message || 'Erro ao criar pagamento com cartão');
+    let responseData: any;
+    let responseError: any;
+    
+    try {
+      const result = await supabase.functions.invoke('createPayment', {
+        body: {
+          valor,
+          metodo_pagamento: 'credit_card',
+          email_cliente: email,
+          token_cartao: tokenCartao,
+          business_id: businessId,
+          referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        } as PaymentRequest,
+      });
+      
+      responseData = result.data;
+      responseError = result.error;
+    } catch (invokeError: any) {
+      // Capturar erro de invocação (pode ocorrer quando status não é 2xx)
+      console.error('Erro ao invocar Edge Function:', invokeError);
+      responseError = invokeError;
+      
+      // Tentar extrair dados do erro se disponível
+      if (invokeError.data) {
+        responseData = invokeError.data;
+      }
     }
 
-    if (!data.success) {
-      throw new Error(data.error || 'Falha ao processar pagamento com cartão');
+    // Se há erro, tentar extrair mensagem detalhada
+    if (responseError) {
+      console.error('Erro na Edge Function:', responseError);
+      console.error('Data recebida (pode conter detalhes do erro):', responseData);
+      
+      let errorMessage = 'Erro ao criar pagamento com cartão';
+      
+      // Prioridade 1: Mensagem do data (resposta JSON da Edge Function)
+      if (responseData && responseData.error) {
+        errorMessage = responseData.error;
+        if (responseData.details) {
+          const detailsStr = typeof responseData.details === 'string' 
+            ? responseData.details 
+            : JSON.stringify(responseData.details);
+          errorMessage += ` - ${detailsStr}`;
+        }
+        if (responseData.hint) {
+          errorMessage += ` - ${responseData.hint}`;
+        }
+      }
+      // Prioridade 2: Mensagem do objeto error
+      else if (responseError.message) {
+        errorMessage = responseError.message;
+      }
+      // Prioridade 3: Contexto do erro
+      else if (responseError.context && responseError.context.msg) {
+        errorMessage = responseError.context.msg;
+      }
+      // Prioridade 4: String direta
+      else if (typeof responseError === 'string') {
+        errorMessage = responseError;
+      }
+      
+      throw new Error(errorMessage);
     }
 
-    return data as CreditCardPaymentResponse;
+    if (!responseData || !responseData.success) {
+      console.error('Resposta sem sucesso da Edge Function:', responseData);
+      throw new Error(responseData?.error || 'Falha ao processar pagamento com cartão');
+    }
+
+    return responseData as CreditCardPaymentResponse;
   } catch (error: any) {
     console.error('Erro ao criar pagamento com cartão:', error);
     return {

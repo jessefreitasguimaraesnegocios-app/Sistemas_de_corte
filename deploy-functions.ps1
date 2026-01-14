@@ -34,6 +34,17 @@ if ($LASTEXITCODE -ne 0) {
 
 Write-Host "✅ checkPaymentStatus deployado com sucesso!" -ForegroundColor Green
 
+# Fazer deploy da função updateBusinessConfig
+Write-Host "`n📤 Fazendo deploy de updateBusinessConfig..." -ForegroundColor Cyan
+npx supabase functions deploy updateBusinessConfig --no-verify-jwt --use-api
+
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "❌ Erro ao fazer deploy de updateBusinessConfig" -ForegroundColor Red
+    exit 1
+}
+
+Write-Host "✅ updateBusinessConfig deployado com sucesso!" -ForegroundColor Green
+
 Write-Host "`n✅ Deploy concluído com sucesso!" -ForegroundColor Green
 Write-Host "`n💡 Dica: Configure as variáveis de ambiente no Supabase Dashboard:" -ForegroundColor Yellow
 Write-Host "   - MP_SPONSOR_ID_LOJA" -ForegroundColor White

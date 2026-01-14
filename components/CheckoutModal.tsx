@@ -137,21 +137,25 @@ export default function CheckoutModal({
         total, 
         email, 
         businessId,
-        businessIdType: typeof businessId,
-        businessIdLength: businessId?.length 
+        productId
       });
       
-      // Verificar se businessId parece ser um UUID válido
-      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
       let validBusinessId = businessId;
       
-      if (businessId && !uuidRegex.test(businessId) && !businessId.match(/^\d+$/)) {
-        console.warn('businessId não parece ser um UUID válido:', businessId);
+      // Verificar se o businessId fornecido existe no banco de dados
+      const { data: existingBusiness, error: businessCheckError } = await supabase
+        .from('businesses')
+        .select('id, status, mp_access_token')
+        .eq('id', businessId)
+        .single();
+      
+      if (businessCheckError || !existingBusiness) {
+        console.warn('Business não encontrado com o ID fornecido:', businessId);
         console.log('Tentando buscar business correto do banco de dados...');
         
         try {
-          // Primeiro, tentar buscar o business_id correto usando o ID do produto
-          if (productId && uuidRegex.test(productId)) {
+          // Tentar buscar o business_id usando o ID do produto
+          if (productId) {
             console.log('Buscando business_id usando productId:', productId);
             const { data: productData, error: productError } = await supabase
               .from('products')
@@ -163,40 +167,37 @@ export default function CheckoutModal({
               const productBusinessId = productData.business_id;
               console.log('business_id encontrado no produto:', productBusinessId);
               
-              // Verificar se o business_id do produto é um UUID válido
-              if (uuidRegex.test(productBusinessId)) {
+              // Verificar se esse business existe e está ativo
+              const { data: productBusiness, error: productBizError } = await supabase
+                .from('businesses')
+                .select('id, status')
+                .eq('id', productBusinessId)
+                .single();
+              
+              if (!productBizError && productBusiness && productBusiness.status === 'ACTIVE') {
                 validBusinessId = productBusinessId;
                 console.log('Usando business_id do produto:', validBusinessId);
               } else {
-                console.warn('business_id do produto também é inválido:', productBusinessId);
+                console.warn('Business do produto não encontrado ou inativo:', productBusinessId);
               }
             }
           }
           
-          // Se ainda não tem um businessId válido, buscar businesses com UUID válido
-          if (!validBusinessId || !uuidRegex.test(validBusinessId)) {
-            console.log('Buscando businesses ativos com UUID válido...');
+          // Se ainda não tem um businessId válido, buscar qualquer business ativo
+          if (!validBusinessId || (existingBusiness && existingBusiness.status !== 'ACTIVE')) {
+            console.log('Buscando businesses ativos...');
             const { data: businesses, error: bizError } = await supabase
               .from('businesses')
               .select('id')
-              .eq('status', 'ACTIVE');
+              .eq('status', 'ACTIVE')
+              .limit(1);
             
             if (!bizError && businesses && businesses.length > 0) {
-              // Filtrar apenas businesses com UUID válido
-              const validBusinesses = businesses.filter(b => uuidRegex.test(b.id));
-              
-              if (validBusinesses.length > 0) {
-                validBusinessId = validBusinesses[0].id;
-                console.log('Business válido encontrado no banco:', validBusinessId);
-              } else {
-                console.error('Nenhum business com UUID válido encontrado no banco');
-                setError(`ID do estabelecimento inválido: ${businessId}. Nenhum estabelecimento válido encontrado no banco de dados. Por favor, entre em contato com o suporte.`);
-                setLoading(false);
-                return;
-              }
+              validBusinessId = businesses[0].id;
+              console.log('Business ativo encontrado no banco:', validBusinessId);
             } else {
-              console.error('Erro ao buscar businesses ou nenhum encontrado:', bizError);
-              setError(`ID do estabelecimento inválido: ${businessId}. Erro ao buscar estabelecimento válido. Por favor, recarregue a página e tente novamente.`);
+              console.error('Nenhum business ativo encontrado no banco');
+              setError(`ID do estabelecimento inválido: ${businessId}. Nenhum estabelecimento válido encontrado no banco de dados. Por favor, entre em contato com o suporte.`);
               setLoading(false);
               return;
             }
@@ -207,6 +208,16 @@ export default function CheckoutModal({
           setLoading(false);
           return;
         }
+      } else if (existingBusiness.status !== 'ACTIVE') {
+        // Business existe mas não está ativo
+        setError('O estabelecimento não está ativo. Por favor, entre em contato com o suporte.');
+        setLoading(false);
+        return;
+      } else if (!existingBusiness.mp_access_token) {
+        // Business existe mas não tem token configurado
+        setError('O estabelecimento não possui Access Token do Mercado Pago configurado. Configure o token antes de processar pagamentos.');
+        setLoading(false);
+        return;
       }
       
       const response = await criarPagamentoPix(total, email, validBusinessId);
@@ -270,6 +281,87 @@ export default function CheckoutModal({
     setError(null);
 
     try {
+      let validBusinessId = businessId;
+      
+      // Verificar se o businessId fornecido existe no banco de dados
+      const { data: existingBusiness, error: businessCheckError } = await supabase
+        .from('businesses')
+        .select('id, status, mp_access_token')
+        .eq('id', businessId)
+        .single();
+      
+      if (businessCheckError || !existingBusiness) {
+        console.warn('Business não encontrado com o ID fornecido:', businessId);
+        console.log('Tentando buscar business correto do banco de dados...');
+        
+        try {
+          // Tentar buscar o business_id usando o ID do produto
+          if (productId) {
+            console.log('Buscando business_id usando productId:', productId);
+            const { data: productData, error: productError } = await supabase
+              .from('products')
+              .select('business_id')
+              .eq('id', productId)
+              .single();
+            
+            if (!productError && productData && productData.business_id) {
+              const productBusinessId = productData.business_id;
+              console.log('business_id encontrado no produto:', productBusinessId);
+              
+              // Verificar se esse business existe e está ativo
+              const { data: productBusiness, error: productBizError } = await supabase
+                .from('businesses')
+                .select('id, status, mp_access_token')
+                .eq('id', productBusinessId)
+                .single();
+              
+              if (!productBizError && productBusiness && productBusiness.status === 'ACTIVE' && productBusiness.mp_access_token) {
+                validBusinessId = productBusinessId;
+                console.log('Usando business_id do produto:', validBusinessId);
+              } else {
+                console.warn('Business do produto não encontrado, inativo ou sem token:', productBusinessId);
+              }
+            }
+          }
+          
+          // Se ainda não tem um businessId válido, buscar qualquer business ativo com token
+          if (!validBusinessId || (existingBusiness && existingBusiness.status !== 'ACTIVE')) {
+            console.log('Buscando businesses ativos com token configurado...');
+            const { data: businesses, error: bizError } = await supabase
+              .from('businesses')
+              .select('id, mp_access_token')
+              .eq('status', 'ACTIVE')
+              .not('mp_access_token', 'is', null)
+              .limit(1);
+            
+            if (!bizError && businesses && businesses.length > 0) {
+              validBusinessId = businesses[0].id;
+              console.log('Business ativo encontrado no banco:', validBusinessId);
+            } else {
+              console.error('Nenhum business ativo encontrado no banco');
+              setError(`ID do estabelecimento inválido: ${businessId}. Nenhum estabelecimento válido encontrado no banco de dados. Por favor, entre em contato com o suporte.`);
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (lookupError) {
+          console.error('Erro ao buscar business no banco:', lookupError);
+          setError(`ID do estabelecimento inválido: ${businessId}. Erro ao buscar estabelecimento. Por favor, recarregue a página e tente novamente.`);
+          setLoading(false);
+          return;
+        }
+      } else if (existingBusiness.status !== 'ACTIVE') {
+        // Business existe mas não está ativo
+        setError('O estabelecimento não está ativo. Por favor, entre em contato com o suporte.');
+        setLoading(false);
+        return;
+      } else if (!existingBusiness.mp_access_token) {
+        // Business existe mas não tem token configurado
+        setError('O estabelecimento não possui Access Token do Mercado Pago configurado. Configure o token antes de processar pagamentos.');
+        setLoading(false);
+        return;
+      }
+      
       // NOTA: Em produção, você deve usar o Mercado Pago SDK para gerar o token
       // Por enquanto, vamos simular um token (isso NÃO funciona em produção real)
       // Para produção, instale: npm install @mercadopago/sdk-react
@@ -281,7 +373,7 @@ export default function CheckoutModal({
       // Em produção, use:
       // const { token } = await mp.getCardToken({ cardNumber, cardholderName, cardExpirationMonth, cardExpirationYear, securityCode });
       
-      const response = await criarPagamentoCartao(total, email, mockToken, businessId);
+      const response = await criarPagamentoCartao(total, email, mockToken, validBusinessId);
       
       if (response.success && response.status === 'approved') {
         setCardData(response);
