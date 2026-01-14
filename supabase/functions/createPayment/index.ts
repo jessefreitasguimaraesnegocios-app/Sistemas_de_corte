@@ -268,12 +268,17 @@ serve(async (req: Request) => {
       );
     }
 
+    // Gerar X-Idempotency-Key único para esta requisição
+    // Usar external_reference + timestamp para garantir unicidade
+    const idempotencyKey = `${referencia_externa}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    
     // Chamada para API do Mercado Pago
     const mp_response = await fetch("https://api.mercadopago.com/v1/payments", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
         "Content-Type": "application/json",
+        "X-Idempotency-Key": idempotencyKey,
       },
       body: JSON.stringify(dados_pagamento),
     });
