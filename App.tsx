@@ -54,9 +54,12 @@ const INITIAL_PRODUCTS: Product[] = [
 // --- TOAST COMPONENT ---
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
   useEffect(() => {
-    const timer = setTimeout(onClose, 3000);
+    const timer = setTimeout(() => {
+      onClose();
+    }, 3000);
     return () => clearTimeout(timer);
-  }, [onClose]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Remover onClose das dependências para evitar re-renders infinitos
 
   return (
     <div className={`fixed bottom-20 left-1/2 -translate-x-1/2 px-6 py-4 rounded-2xl shadow-2xl flex items-center gap-3 z-[250] animate-in slide-in-from-bottom-4 duration-300 ${type === 'success' ? 'bg-green-600 text-white' : 'bg-red-600 text-white'}`}>
