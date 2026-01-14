@@ -5,7 +5,7 @@ import {
   Plus, Search, Star, Clock, Menu, X, TrendingUp, CreditCard, AlertCircle, 
   CheckCircle2, Bell, RefreshCw, ExternalLink, ShieldCheck, Zap, ArrowLeft, 
   Scissors, ShoppingBasket, ChevronRight, Sparkles, Package, UserCheck, TrendingDown,
-  Trash2, Edit3, Heart, Filter, List, Minus, ShoppingCart, Camera, Image
+  Trash2, Edit3, Heart, Filter, List, Minus, ShoppingCart, Camera, Image, Eye, EyeOff
 } from 'lucide-react';
 import { 
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, 
@@ -13,7 +13,7 @@ import {
 } from 'recharts';
 import { User, Business, Service, Product, Appointment, Collaborator, UserRole, Transaction } from './types';
 import { generateBusinessDescription } from './services/geminiService';
-import { supabase, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut } from './lib/supabase';
+import { supabase, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, updatePassword } from './lib/supabase';
 import CheckoutModal from './components/CheckoutModal';
 
 // --- TYPES ---
@@ -230,13 +230,31 @@ const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, on
 // --- CRM BUSINESS OWNER VIEW ---
 
 const BusinessOwnerDashboard = ({ business, collaborators, products, appointments, setCollaborators, setProducts, setAppointments, addToast, setBusinesses, businesses }: any) => {
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'TEAM'>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'TEAM' | 'SETTINGS'>('DASHBOARD');
   const [showModal, setShowModal] = useState<string | null>(null);
   const [newItem, setNewItem] = useState<any>({});
   const [editingItem, setEditingItem] = useState<any>(null);
   const [confirmDeleteModal, setConfirmDeleteModal] = useState<{type: 'product' | 'collaborator', id: string, name: string} | null>(null);
   const [showBusinessEditModal, setShowBusinessEditModal] = useState(false);
   const [businessEditForm, setBusinessEditForm] = useState({ name: business.name, image: business.image });
+  const [showChangePasswordModal, setShowChangePasswordModal] = useState(false);
+  const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [userEmail, setUserEmail] = useState<string>('');
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // Buscar email do usuário
+  useEffect(() => {
+    const fetchUserEmail = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.email) {
+        setUserEmail(user.email);
+      }
+    };
+    fetchUserEmail();
+  }, []);
 
   // Atualizar formulário quando business mudar
   useEffect(() => {
@@ -448,6 +466,58 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
             </div>
           </div>
         );
+      case 'SETTINGS':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-10">
+              <h3 className="text-2xl font-black text-slate-900 mb-8 flex items-center gap-2">
+                <Settings className="text-indigo-600" size={24} />
+                Configurações da Conta
+              </h3>
+
+              <div className="space-y-6">
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <div className="flex items-center justify-between mb-4">
+                    <div>
+                      <h4 className="text-lg font-black text-slate-900">Segurança</h4>
+                      <p className="text-sm text-slate-500 mt-1">Altere sua senha de acesso</p>
+                    </div>
+                    <button
+                      onClick={() => setShowChangePasswordModal(true)}
+                      className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg"
+                    >
+                      Alterar Senha
+                    </button>
+                  </div>
+                </div>
+
+                <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
+                  <h4 className="text-lg font-black text-slate-900 mb-4">Informações da Conta</h4>
+                  <div className="space-y-4">
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Email</label>
+                      <input
+                        type="email"
+                        value={userEmail}
+                        disabled
+                        className="w-full p-4 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 cursor-not-allowed"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nome do Estabelecimento</label>
+                      <input
+                        type="text"
+                        value={business.name}
+                        disabled
+                        className="w-full p-4 bg-white border border-slate-200 rounded-xl font-medium text-slate-700 cursor-not-allowed"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
       default: // DASHBOARD
         return (
           <div className="space-y-8 animate-in fade-in duration-500">
@@ -469,6 +539,49 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
             </div>
           </div>
         );
+    }
+  };
+
+  const handleChangePassword = async () => {
+    if (!passwordForm.newPassword || passwordForm.newPassword.length < 6) {
+      addToast('A nova senha deve ter no mínimo 6 caracteres', 'error');
+      return;
+    }
+
+    if (passwordForm.newPassword !== passwordForm.confirmPassword) {
+      addToast('As senhas não coincidem', 'error');
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      // Verificar senha atual fazendo login
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user?.email) {
+        throw new Error('Usuário não encontrado');
+      }
+
+      // Tentar fazer login com a senha atual para validar
+      try {
+        await signInWithEmail(user.email, passwordForm.currentPassword);
+      } catch (error: any) {
+        if (error.message?.includes('Invalid login credentials')) {
+          throw new Error('Senha atual incorreta');
+        }
+        throw error;
+      }
+
+      // Atualizar senha
+      await updatePassword(passwordForm.newPassword);
+      
+      addToast('Senha alterada com sucesso!', 'success');
+      setShowChangePasswordModal(false);
+      setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+    } catch (error: any) {
+      console.error('Erro ao alterar senha:', error);
+      addToast(error.message || 'Erro ao alterar senha. Verifique os dados e tente novamente.', 'error');
+    } finally {
+      setChangingPassword(false);
     }
   };
 
@@ -512,6 +625,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
              { id: 'APPOINTMENTS', icon: Calendar },
              { id: 'STORE', icon: ShoppingBag },
              { id: 'TEAM', icon: Users },
+             { id: 'SETTINGS', icon: Settings },
            ].map(tab => (
              <button 
                key={tab.id}
@@ -632,7 +746,21 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
                   <div className="grid grid-cols-2 gap-4">
                     <div>
                       <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Preço (R$)</label>
-                      <input type="number" placeholder="0.00" value={newItem.price || ''} onChange={e => setNewItem({...newItem, price: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                      <input 
+                        type="number" 
+                        step="0.01" 
+                        min="0" 
+                        placeholder="0.00" 
+                        value={newItem.price || ''} 
+                        onChange={e => {
+                          const value = e.target.value;
+                          // Permitir números decimais
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setNewItem({...newItem, price: value});
+                          }
+                        }} 
+                        className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                      />
                     </div>
                     <div>
                       <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Estoque Inicial</label>
@@ -920,6 +1048,102 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, appointment
                   Confirmar Remoção
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Alterar Senha */}
+      {showChangePasswordModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md z-[100] flex items-center justify-center p-6">
+          <div className="bg-white rounded-[3rem] w-full max-w-lg p-10 shadow-2xl animate-in zoom-in-95 duration-200">
+            <div className="flex justify-between items-center mb-10">
+              <h3 className="text-2xl font-black text-slate-900">Alterar Senha</h3>
+              <button 
+                onClick={() => {
+                  setShowChangePasswordModal(false);
+                  setPasswordForm({ currentPassword: '', newPassword: '', confirmPassword: '' });
+                  setShowCurrentPassword(false);
+                  setShowNewPassword(false);
+                  setShowConfirmPassword(false);
+                }} 
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-700 hover:text-slate-900 transition-colors"
+              >
+                <X />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Senha Atual</label>
+                <div className="relative">
+                  <input
+                    type={showCurrentPassword ? "text" : "password"}
+                    placeholder="Digite sua senha atual"
+                    value={passwordForm.currentPassword}
+                    onChange={e => setPasswordForm({...passwordForm, currentPassword: e.target.value})}
+                    className="w-full p-5 pr-14 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-2"
+                    title={showCurrentPassword ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {showCurrentPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Nova Senha</label>
+                <div className="relative">
+                  <input
+                    type={showNewPassword ? "text" : "password"}
+                    placeholder="Mínimo 6 caracteres"
+                    value={passwordForm.newPassword}
+                    onChange={e => setPasswordForm({...passwordForm, newPassword: e.target.value})}
+                    className="w-full p-5 pr-14 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPassword(!showNewPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-2"
+                    title={showNewPassword ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {showNewPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Confirmar Nova Senha</label>
+                <div className="relative">
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    placeholder="Digite a nova senha novamente"
+                    value={passwordForm.confirmPassword}
+                    onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})}
+                    className="w-full p-5 pr-14 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-2"
+                    title={showConfirmPassword ? "Ocultar senha" : "Mostrar senha"}
+                  >
+                    {showConfirmPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                  </button>
+                </div>
+              </div>
+
+              <button
+                onClick={handleChangePassword}
+                disabled={changingPassword || !passwordForm.currentPassword || !passwordForm.newPassword || !passwordForm.confirmPassword || passwordForm.newPassword.length < 6}
+                className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {changingPassword ? 'Alterando...' : 'Alterar Senha'}
+              </button>
             </div>
           </div>
         </div>
@@ -1298,6 +1522,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
   const [editForm, setEditForm] = useState<any>({});
   const [confirmPauseModal, setConfirmPauseModal] = useState<{business: Business | null, action: 'pause' | 'activate'}>({business: null, action: 'pause'});
   const [confirmDeleteModal, setConfirmDeleteModal] = useState<Business | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
   
   // Estados para configurações
   const [defaultSplit, setDefaultSplit] = useState(10);
@@ -1307,25 +1532,158 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [autoApprove, setAutoApprove] = useState(true);
   const [showAuditLogs, setShowAuditLogs] = useState(false);
+  const [users, setUsers] = useState<any[]>([]);
+  const [loadingUsers, setLoadingUsers] = useState(false);
+
+  // Buscar usuários do banco de dados
+  const fetchUsers = async () => {
+    setLoadingUsers(true);
+    try {
+      const { data: usersData, error: usersError } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (usersError) {
+        throw usersError;
+      }
+
+      // Buscar informações dos businesses para usuários que são proprietários
+      const usersWithBusinesses = await Promise.all(
+        (usersData || []).map(async (user: any) => {
+          if (user.business_id) {
+            const { data: businessData } = await supabase
+              .from('businesses')
+              .select('id, name')
+              .eq('id', user.business_id)
+              .single();
+            
+            return {
+              ...user,
+              business: businessData
+            };
+          }
+          return user;
+        })
+      );
+
+      setUsers(usersWithBusinesses);
+    } catch (error: any) {
+      console.error('Erro ao buscar usuários:', error);
+      addToast('Erro ao carregar usuários', 'error');
+    } finally {
+      setLoadingUsers(false);
+    }
+  };
+
+  // Buscar usuários quando a aba USERS for selecionada
+  useEffect(() => {
+    if (activeTab === 'USERS') {
+      fetchUsers();
+    }
+  }, [activeTab]);
 
   const handleAddPartner = async () => {
+    if (!newBiz.email || !newBiz.password || newBiz.password.length < 6) {
+      addToast('Preencha email e senha (mínimo 6 caracteres)', 'error');
+      return;
+    }
+
     setLoading(true);
-    const desc = await generateBusinessDescription(newBiz.name, newBiz.type);
-    const biz: Business = {
-      ...newBiz,
-      id: Math.random().toString(),
-      description: desc,
-      address: 'Novo Endereço, 00',
-      image: newBiz.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image,
-      rating: 5.0,
-      ownerId: Math.random().toString(),
-      status: 'ACTIVE'
-    };
-    setBusinesses([...businesses, biz]);
-    addToast(`Parceiro ${newBiz.name} cadastrado e ativo!`, 'success');
-    setLoading(false);
-    setShowModal(false);
-    setNewBiz({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
+    try {
+      // Criar usuário no Supabase Auth usando signUp
+      let authData;
+      try {
+        authData = await signUpWithEmail(
+          newBiz.email,
+          newBiz.password,
+          newBiz.name
+        );
+      } catch (signUpError: any) {
+        console.error('Erro no signUp:', signUpError);
+        throw new Error(signUpError.message || 'Erro ao criar usuário no sistema de autenticação');
+      }
+
+      if (!authData) {
+        throw new Error('Erro ao criar usuário: nenhum dado retornado');
+      }
+
+      if (!authData || !authData.user) {
+        // Se o Supabase tiver confirmação de email habilitada, o user pode ser null
+        // Nesse caso, o usuário precisa confirmar o email primeiro
+        throw new Error('Erro ao criar usuário: usuário não foi criado. Verifique se o email já está cadastrado ou se a confirmação de email está habilitada no Supabase. Se estiver, desabilite a confirmação de email nas configurações do Supabase Auth.');
+      }
+
+      const ownerId = authData.user.id;
+      
+      if (!ownerId) {
+        throw new Error('Erro ao criar usuário: ID do usuário não foi gerado');
+      }
+      
+      const desc = await generateBusinessDescription(newBiz.name, newBiz.type);
+      
+      // Gerar ID único para o business
+      const businessId = `biz_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Criar business no banco de dados
+      const { data: businessData, error: businessError } = await supabase
+        .from('businesses')
+        .insert({
+          id: businessId,
+          name: newBiz.name,
+          type: newBiz.type,
+          description: desc,
+          address: 'Novo Endereço, 00',
+          image: newBiz.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image,
+          owner_id: ownerId,
+          revenue_split: newBiz.revenueSplit || 10,
+          monthly_fee: newBiz.monthlyFee || 150,
+          status: 'ACTIVE'
+        })
+        .select()
+        .single();
+
+      if (businessError) {
+        console.error('Erro ao criar business:', businessError);
+        console.error('Detalhes do erro:', JSON.stringify(businessError, null, 2));
+        
+        let errorMessage = 'Erro ao criar estabelecimento. ';
+        
+        if (businessError.code === '42501' || businessError.message?.includes('permission') || businessError.message?.includes('policy')) {
+          errorMessage += 'Erro de permissão: Execute a migração 010_allow_super_admin_create_businesses.sql no Supabase para permitir que SUPER_ADMIN crie businesses.';
+        } else if (businessError.code === '23505') {
+          errorMessage += 'Já existe um estabelecimento com este ID.';
+        } else {
+          errorMessage += businessError.message || 'Verifique as configurações do banco de dados.';
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      const biz: Business = {
+        id: businessData.id,
+        name: businessData.name,
+        type: businessData.type,
+        description: businessData.description || desc,
+        address: businessData.address || 'Novo Endereço, 00',
+        image: businessData.image || (newBiz.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+        rating: 5.0,
+        ownerId: businessData.owner_id,
+        revenueSplit: businessData.revenue_split || newBiz.revenueSplit || 10,
+        monthlyFee: businessData.monthly_fee || newBiz.monthlyFee || 150,
+        status: businessData.status || 'ACTIVE'
+      };
+
+      setBusinesses([...businesses, biz]);
+      addToast(`Parceiro ${newBiz.name} cadastrado! Credenciais: ${newBiz.email} / ${newBiz.password}`, 'success');
+      setShowModal(false);
+      setNewBiz({ type: 'BARBERSHOP', revenueSplit: 10, monthlyFee: 150 });
+    } catch (error: any) {
+      console.error('Erro ao criar parceiro:', error);
+      addToast(error.message || 'Erro ao criar parceiro. Verifique os dados e tente novamente.', 'error');
+    } finally {
+      setLoading(false);
+    }
   };
 
   // Handlers de configurações
@@ -1792,6 +2150,116 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
             </div>
           </div>
         );
+      case 'USERS':
+        return (
+          <div className="space-y-6 animate-in fade-in duration-500">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="text-2xl font-black text-slate-900 flex items-center gap-2">
+                  <Users className="text-indigo-600" size={28} />
+                  Usuários do Sistema
+                </h3>
+                <p className="text-slate-500 text-sm mt-1">Gerencie todos os usuários cadastrados na plataforma</p>
+              </div>
+              <button
+                onClick={fetchUsers}
+                disabled={loadingUsers}
+                className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg disabled:opacity-50 flex items-center gap-2"
+              >
+                <RefreshCw className={loadingUsers ? 'animate-spin' : ''} size={18} />
+                Atualizar
+              </button>
+            </div>
+
+            {loadingUsers ? (
+              <div className="bg-white rounded-[2.5rem] border border-slate-200 shadow-sm p-20 text-center">
+                <RefreshCw className="animate-spin text-indigo-600 mx-auto mb-4" size={48} />
+                <p className="text-slate-600 font-semibold">Carregando usuários...</p>
+              </div>
+            ) : (
+              <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center">
+                  <h4 className="font-black text-slate-900">Lista de Usuários ({users.length})</h4>
+                  <button className="text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl hover:bg-indigo-100 transition-colors">
+                    Exportar CSV
+                  </button>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      <tr>
+                        <th className="px-8 py-4">Nome</th>
+                        <th className="px-8 py-4">Email</th>
+                        <th className="px-8 py-4 text-center">Tipo</th>
+                        <th className="px-8 py-4">Estabelecimento</th>
+                        <th className="px-8 py-4 text-center">Status</th>
+                        <th className="px-8 py-4 text-center">Último Login</th>
+                        <th className="px-8 py-4 text-center">Cadastrado em</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {users.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-8 py-12 text-center text-slate-500">
+                            Nenhum usuário encontrado
+                          </td>
+                        </tr>
+                      ) : (
+                        users.map((user: any) => (
+                          <tr key={user.id} className="text-sm hover:bg-slate-50 transition-colors">
+                            <td className="px-8 py-4 font-bold text-slate-900">{user.full_name || 'N/A'}</td>
+                            <td className="px-8 py-4 text-slate-700">{user.email}</td>
+                            <td className="px-8 py-4 text-center">
+                              <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
+                                user.role === 'SUPER_ADMIN' ? 'bg-purple-100 text-purple-700' :
+                                user.role === 'BUSINESS_OWNER' ? 'bg-indigo-100 text-indigo-700' :
+                                'bg-slate-100 text-slate-700'
+                              }`}>
+                                {user.role === 'SUPER_ADMIN' ? 'ADMIN' :
+                                 user.role === 'BUSINESS_OWNER' ? 'PROPRIETÁRIO' :
+                                 'CLIENTE'}
+                              </span>
+                            </td>
+                            <td className="px-8 py-4 text-slate-600">
+                              {user.business?.name || user.business_id || '-'}
+                            </td>
+                            <td className="px-8 py-4 text-center">
+                              <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
+                                user.is_active ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                              }`}>
+                                {user.is_active ? 'ATIVO' : 'INATIVO'}
+                              </span>
+                            </td>
+                            <td className="px-8 py-4 text-center text-slate-600 text-xs">
+                              {user.last_login 
+                                ? new Date(user.last_login).toLocaleDateString('pt-BR', { 
+                                    day: '2-digit', 
+                                    month: '2-digit', 
+                                    year: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit'
+                                  })
+                                : 'Nunca'}
+                            </td>
+                            <td className="px-8 py-4 text-center text-slate-600 text-xs">
+                              {user.created_at 
+                                ? new Date(user.created_at).toLocaleDateString('pt-BR', { 
+                                    day: '2-digit', 
+                                    month: '2-digit', 
+                                    year: 'numeric'
+                                  })
+                                : '-'}
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </div>
+        );
       default: // DASHBOARD
         return (
           <div className="space-y-8 animate-in fade-in duration-500">
@@ -1853,7 +2321,34 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast }: an
                     </select>
                     <input type="number" placeholder="Split Hub %" value={newBiz.revenueSplit || ''} onChange={e => setNewBiz({...newBiz, revenueSplit: Number(e.target.value)})} className="p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
                  </div>
-                 <button onClick={handleAddPartner} disabled={loading || !newBiz.name} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                 <div className="space-y-4 pt-2 border-t border-slate-200">
+                   <div>
+                     <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Email do Proprietário</label>
+                     <input type="email" placeholder="proprietario@exemplo.com" value={newBiz.email || ''} onChange={e => setNewBiz({...newBiz, email: e.target.value})} className="w-full p-5 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" />
+                   </div>
+                   <div>
+                     <label className="block text-xs font-black text-slate-700 uppercase tracking-widest mb-2">Senha Inicial</label>
+                     <div className="relative">
+                       <input 
+                         type={showPassword ? "text" : "password"} 
+                         placeholder="Mínimo 6 caracteres" 
+                         value={newBiz.password || ''} 
+                         onChange={e => setNewBiz({...newBiz, password: e.target.value})} 
+                         className="w-full p-5 pr-14 bg-slate-50 border-none rounded-2xl font-bold text-slate-900 placeholder:text-slate-400 outline-none focus:ring-2 focus:ring-indigo-500" 
+                       />
+                       <button
+                         type="button"
+                         onClick={() => setShowPassword(!showPassword)}
+                         className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 transition-colors p-2"
+                         title={showPassword ? "Ocultar senha" : "Mostrar senha"}
+                       >
+                         {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
+                       </button>
+                     </div>
+                     <p className="text-xs text-slate-500 mt-2">O proprietário poderá alterar a senha após o primeiro login</p>
+                   </div>
+                 </div>
+                 <button onClick={handleAddPartner} disabled={loading || !newBiz.name || !newBiz.email || !newBiz.password || newBiz.password.length < 6} className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
                    {loading ? 'Provisionando...' : 'Cadastrar e Ativar'}
                  </button>
               </div>
@@ -2411,9 +2906,24 @@ export default function App() {
 
   // --- CART LOGIC ---
   const addToCart = (product: Product) => {
+    // Verificar se há estoque disponível
+    const currentStock = products.find(p => p.id === product.id)?.stock || 0;
+    const existingCartItem = cart.find(item => item.product.id === product.id);
+    const currentQuantity = existingCartItem ? existingCartItem.quantity : 0;
+    
+    if (currentStock <= currentQuantity) {
+      addToast(`Estoque insuficiente para ${product.name}. Disponível: ${currentStock}`, 'error');
+      return;
+    }
+
     setCart(prev => {
       const existing = prev.find(item => item.product.id === product.id);
       if (existing) {
+        // Verificar se não excede o estoque ao aumentar a quantidade
+        if (existing.quantity + 1 > currentStock) {
+          addToast(`Estoque insuficiente. Disponível: ${currentStock}`, 'error');
+          return prev;
+        }
         return prev.map(item => 
           item.product.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
         );
@@ -2431,6 +2941,15 @@ export default function App() {
     setCart(prev => prev.map(item => {
       if (item.product.id === productId) {
         const newQty = Math.max(1, item.quantity + delta);
+        // Verificar se não excede o estoque disponível
+        const product = products.find(p => p.id === productId);
+        const availableStock = product?.stock || 0;
+        
+        if (newQty > availableStock) {
+          addToast(`Estoque insuficiente. Disponível: ${availableStock}`, 'error');
+          return item;
+        }
+        
         return { ...item, quantity: newQty };
       }
       return item;
@@ -2461,6 +2980,31 @@ export default function App() {
       // Pega o businessId do primeiro produto (assumindo que todos são do mesmo negócio)
       const businessId = cart[0]?.product.businessId;
 
+      // Verificar estoque antes de processar a venda
+      const stockIssues: string[] = [];
+      cart.forEach(item => {
+        const product = products.find(p => p.id === item.product.id);
+        if (product && product.stock < item.quantity) {
+          stockIssues.push(`${product.name}: estoque insuficiente (disponível: ${product.stock}, solicitado: ${item.quantity})`);
+        }
+      });
+
+      if (stockIssues.length > 0) {
+        addToast(`Erro: ${stockIssues.join('; ')}`, 'error');
+        return;
+      }
+
+      // Atualizar estoque dos produtos vendidos
+      const updatedProducts = products.map(product => {
+        const cartItem = cart.find(item => item.product.id === product.id);
+        if (cartItem) {
+          const newStock = product.stock - cartItem.quantity;
+          return { ...product, stock: Math.max(0, newStock) };
+        }
+        return product;
+      });
+      setProducts(updatedProducts);
+
       // Salva transação no Supabase
       if (user && businessId) {
         const { error: transactionError } = await supabase
@@ -2481,7 +3025,7 @@ export default function App() {
         }
       }
 
-      addToast('Pagamento realizado com sucesso!', 'success');
+      addToast('Pagamento realizado com sucesso! Estoque atualizado.', 'success');
       setCart([]);
       setIsCheckoutOpen(false);
     } catch (error: any) {
@@ -2677,6 +3221,20 @@ export default function App() {
             </button>
             <button 
               onClick={() => {
+                setActiveTab('USERS');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-4 px-4 py-3 font-bold text-sm rounded-xl transition-all ${
+                activeTab === 'USERS'
+                  ? 'bg-indigo-50 text-indigo-600' 
+                  : 'text-slate-500 hover:bg-slate-50 hover:text-slate-700'
+              }`}
+            >
+              <UserCheck size={20} />
+              Usuários
+            </button>
+            <button 
+              onClick={() => {
                 setActiveTab('FINANCE');
                 setIsMobileMenuOpen(false);
               }}
@@ -2713,6 +3271,7 @@ export default function App() {
             <nav className="space-y-2">
               <SidebarItem icon={LayoutGrid} label="Dashboard Hub" active={activeTab === 'DASHBOARD'} onClick={() => setActiveTab('DASHBOARD')} />
               <SidebarItem icon={Users} label="Parceiros Ativos" active={activeTab === 'PARTNERS'} onClick={() => setActiveTab('PARTNERS')} />
+              <SidebarItem icon={UserCheck} label="Usuários" active={activeTab === 'USERS'} onClick={() => setActiveTab('USERS')} />
               <SidebarItem icon={DollarSign} label="Split Financeiro" active={activeTab === 'FINANCE'} onClick={() => setActiveTab('FINANCE')} />
               <SidebarItem icon={Settings} label="Configurações Hub" active={activeTab === 'SETTINGS'} onClick={() => setActiveTab('SETTINGS')} />
             </nav>

@@ -15,6 +15,7 @@ Execute as migrações na seguinte ordem:
 7. **007_auto_create_partner_tables.sql** - Sistema automático de criação de tabelas por parceiro ⭐ NOVO
 8. **008_setup_existing_businesses.sql** - Setup manual para businesses existentes (opcional)
 9. **009_create_user_profiles.sql** - Tabela de perfis de usuários ⭐ NOVO
+10. **010_allow_super_admin_create_businesses.sql** - Permite que SUPER_ADMIN crie businesses ⭐ NOVO
 
 ## Como Aplicar as Migrações
 
@@ -60,6 +61,7 @@ psql -h db.seu-projeto.supabase.co -U postgres -d postgres
 \i supabase/migrations/007_auto_create_partner_tables.sql
 \i supabase/migrations/008_setup_existing_businesses.sql
 \i supabase/migrations/009_create_user_profiles.sql
+\i supabase/migrations/010_allow_super_admin_create_businesses.sql
 ```
 
 ## Estrutura das Tabelas
