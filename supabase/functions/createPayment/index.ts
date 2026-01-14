@@ -118,21 +118,44 @@ serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Buscar informações do negócio, incluindo o Access Token do Mercado Pago
+    console.log("Buscando business com ID:", business_id);
     const { data: business, error: businessError } = await supabase
       .from("businesses")
       .select("id, name, mp_access_token, revenue_split, status")
       .eq("id", business_id)
       .single();
 
-    if (businessError || !business) {
+    if (businessError) {
+      console.error("Erro ao buscar business:", businessError);
       return new Response(
-        JSON.stringify({ error: "Negócio não encontrado", details: businessError?.message }),
+        JSON.stringify({ 
+          error: "Erro ao buscar negócio no banco de dados", 
+          details: businessError.message,
+          business_id: business_id 
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    if (!business) {
+      console.error("Business não encontrado com ID:", business_id);
+      return new Response(
+        JSON.stringify({ 
+          error: "Negócio não encontrado no banco de dados", 
+          business_id: business_id,
+          hint: "Verifique se o ID do negócio está correto e se o negócio existe na tabela businesses"
+        }),
         { 
           status: 404, 
           headers: { ...corsHeaders, "Content-Type": "application/json" } 
         }
       );
     }
+
+    console.log("Business encontrado:", { id: business.id, name: business.name, status: business.status, has_token: !!business.mp_access_token });
 
     // Verificar se o negócio está ativo
     if (business.status !== "ACTIVE") {

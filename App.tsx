@@ -4254,7 +4254,14 @@ export default function App() {
         onClose={() => setIsCheckoutOpen(false)}
         total={cartTotal}
         email={user?.email || ''}
-        businessId={cart[0]?.product.businessId}
+        businessId={(() => {
+          const bid = cart[0]?.product.businessId;
+          if (bid) {
+            console.log('CheckoutModal - businessId do produto:', bid);
+            console.log('CheckoutModal - produto completo:', cart[0]?.product);
+          }
+          return bid;
+        })()}
         onPaymentSuccess={handlePaymentSuccess}
       />
 

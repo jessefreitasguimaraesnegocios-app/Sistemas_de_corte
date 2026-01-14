@@ -130,7 +130,23 @@ export default function CheckoutModal({
     setPaymentStatus(null);
 
     try {
-      console.log('Criando pagamento PIX:', { total, email, businessId });
+      console.log('CheckoutModal - Criando pagamento PIX:', { 
+        total, 
+        email, 
+        businessId,
+        businessIdType: typeof businessId,
+        businessIdLength: businessId?.length 
+      });
+      
+      // Verificar se businessId parece ser um UUID válido
+      const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      if (businessId && !uuidRegex.test(businessId) && !businessId.match(/^\d+$/)) {
+        console.warn('businessId não parece ser um UUID válido:', businessId);
+        setError(`ID do estabelecimento inválido: ${businessId}. Por favor, recarregue a página e tente novamente.`);
+        setLoading(false);
+        return;
+      }
+      
       const response = await criarPagamentoPix(total, email, businessId);
       
       console.log('Resposta do pagamento PIX:', response);

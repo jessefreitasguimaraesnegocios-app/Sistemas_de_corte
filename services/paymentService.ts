@@ -68,16 +68,22 @@ export async function criarPagamentoPix(
     });
 
     if (error) {
-      console.error('Erro na Edge Function:', error);
-      throw new Error(error.message || 'Erro ao criar pagamento PIX');
+      console.error('Erro na Edge Function (error object):', error);
+      // Tentar extrair mensagem de erro mais detalhada
+      const errorMessage = error.message || error.toString() || 'Erro ao criar pagamento PIX';
+      throw new Error(errorMessage);
     }
 
     // Verificar se a resposta contém erro (mesmo com status 200)
     if (data && data.error) {
-      throw new Error(data.error || 'Falha ao processar pagamento PIX');
+      console.error('Erro na resposta da Edge Function:', data);
+      const errorDetails = data.details ? ` Detalhes: ${JSON.stringify(data.details)}` : '';
+      const errorHint = data.hint ? ` Dica: ${data.hint}` : '';
+      throw new Error(`${data.error}${errorDetails}${errorHint}`);
     }
 
     if (!data || !data.success) {
+      console.error('Resposta sem sucesso da Edge Function:', data);
       throw new Error(data?.error || 'Falha ao processar pagamento PIX');
     }
 
