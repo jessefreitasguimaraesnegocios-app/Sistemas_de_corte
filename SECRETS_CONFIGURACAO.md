@@ -12,10 +12,19 @@ Configure estes secrets em: **Supabase Dashboard → Edge Functions → Settings
   - Vá em "Meu perfil" → "Dados da conta"
   - Copie o "User ID"
 
-### 2. `MP_WEBHOOK_URL` (Opcional)
-- **Descrição**: URL do webhook para notificações de pagamento
-- **Valor**: `https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/webhook-payment`
-- **Uso**: Notificações automáticas quando o status do pagamento mudar
+### 2. `MP_WEBHOOK_SECRET` ⭐ RECOMENDADO
+- **Descrição**: Secret key para validar assinatura dos webhooks do Mercado Pago
+- **Valor**: `0f0cf29ea833611c166847c1d05ae82a366c2bb7c29acbf9bc36f36383be1ab8`
+- **Como obter**: 
+  - Acesse o painel do Mercado Pago
+  - Vá em "Suas integrações" → "Webhooks"
+  - Copie o "Secret signature key"
+- **Uso**: Validação de segurança para garantir que os webhooks são realmente do Mercado Pago
+
+### 3. `MP_WEBHOOK_URL` (Opcional - não mais usado)
+- **Descrição**: URL do webhook (não precisa mais configurar como secret)
+- **Valor**: `https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/mercadopago-webhook`
+- **Uso**: Configure esta URL diretamente no painel do Mercado Pago
 
 ## ❌ NÃO Configure Mais
 
@@ -56,9 +65,9 @@ Quando você adicionar um novo salão/bar:
    - **Nome**: `MP_SPONSOR_ID_LOJA`
    - **Valor**: `2622924811`
    - Clique em **Add secret**
-4. (Opcional) Adicione:
-   - **Nome**: `MP_WEBHOOK_URL`
-   - **Valor**: `https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/webhook-payment`
+4. (Recomendado) Adicione:
+   - **Nome**: `MP_WEBHOOK_SECRET`
+   - **Valor**: `0f0cf29ea833611c166847c1d05ae82a366c2bb7c29acbf9bc36f36383be1ab8`
    - Clique em **Add secret**
 
 ## Configurar via CLI
@@ -67,8 +76,8 @@ Quando você adicionar um novo salão/bar:
 # Configurar Sponsor ID (obrigatório)
 npx supabase secrets set MP_SPONSOR_ID_LOJA="2622924811"
 
-# Configurar Webhook URL (opcional)
-npx supabase secrets set MP_WEBHOOK_URL="https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/webhook-payment"
+# Configurar Webhook Secret (recomendado para segurança)
+npx supabase secrets set MP_WEBHOOK_SECRET="0f0cf29ea833611c166847c1d05ae82a366c2bb7c29acbf9bc36f36383be1ab8"
 ```
 
 ## Verificação
