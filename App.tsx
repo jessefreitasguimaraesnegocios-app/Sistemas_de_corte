@@ -2085,7 +2085,34 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
         );
       } catch (signUpError: any) {
         console.error('Erro no signUp:', signUpError);
-        throw new Error(signUpError.message || 'Erro ao criar usuário no sistema de autenticação');
+        
+        // Se o usuário já está registrado, tentar fazer login
+        if (signUpError.message?.includes('already registered') || 
+            signUpError.message?.includes('User already registered') ||
+            signUpError.status === 422) {
+          try {
+            // Tentar fazer login com as credenciais fornecidas
+            const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+              email: newBiz.email,
+              password: newBiz.password
+            });
+            
+            if (signInError) {
+              throw new Error('Este email já está cadastrado, mas a senha está incorreta. Use a opção de recuperação de senha ou entre com a senha correta.');
+            }
+            
+            if (signInData?.user) {
+              authData = signInData;
+              addToast('Usuário já existe. Login realizado automaticamente.', 'success');
+            } else {
+              throw new Error('Usuário já cadastrado. Faça login ou use outro email.');
+            }
+          } catch (loginError: any) {
+            throw new Error(loginError.message || 'Este email já está cadastrado. Faça login ou use outro email.');
+          }
+        } else {
+          throw new Error(signUpError.message || 'Erro ao criar usuário no sistema de autenticação');
+        }
       }
 
       if (!authData) {
@@ -4666,10 +4693,28 @@ export default function App() {
                       }
                     } catch (error: any) {
                       console.error('Erro:', error);
-                      addToast(
-                        error?.message || (isSignUp ? 'Erro ao criar conta' : 'Email ou senha incorretos'),
-                        'error'
-                      );
+                      
+                      // Tratar erro de usuário já registrado
+                      if (isSignUp && (
+                        error?.message?.includes('already registered') || 
+                        error?.message?.includes('User already registered') ||
+                        error?.status === 422
+                      )) {
+                        addToast(
+                          'Este email já está cadastrado. Faça login ou use outro email.',
+                          'error'
+                        );
+                        // Sugerir fazer login em vez de criar conta
+                        setTimeout(() => {
+                          setIsSignUp(false);
+                          addToast('Tente fazer login com este email e senha.', 'success');
+                        }, 2000);
+                      } else {
+                        addToast(
+                          error?.message || (isSignUp ? 'Erro ao criar conta' : 'Email ou senha incorretos'),
+                          'error'
+                        );
+                      }
                     }
                   }}
                   className="w-full bg-slate-900 text-white py-4 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all"
