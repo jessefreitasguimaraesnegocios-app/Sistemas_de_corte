@@ -211,43 +211,55 @@ serve(async (req: Request) => {
     const COMISSAO_PERCENTUAL = business.revenue_split || 10;
 
     // Calcula split usando a porcentagem configurada no negócio
-    // NOTA: application_fee requer configuração específica no Mercado Pago (marketplace/split)
-    // Por enquanto, removemos application_fee para evitar erros
-    // O split pode ser processado manualmente após o pagamento ser aprovado
-    const application_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
+    // O valor da comissão em reais (marketplace_fee)
+    const marketplace_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
+    const application_fee = marketplace_fee; // Para compatibilidade
 
-    // Monta payload da API Mercado Pago
-    const dados_pagamento: any = {
-      transaction_amount: valor,
-      description: `Pagamento ${business.name || "BelezaHub"} - ${business_id}`,
-      payment_method_id: metodo_pagamento === "pix" ? "pix" : undefined,
-      external_reference: referencia_externa,
-    };
-
-    // NOTA: application_fee e sponsor_id foram removidos porque requerem
-    // configuração de marketplace/split no Mercado Pago que pode não estar habilitada
-    // O split de pagamento deve ser processado manualmente após aprovação do pagamento
-    // Para habilitar split automático, configure marketplace no Mercado Pago primeiro
-
-    // Adiciona webhook URL se configurado
-    if (URL_WEBHOOK) {
-      dados_pagamento.notification_url = URL_WEBHOOK;
+    // Validar SPONSOR_ID_LOJA (necessário para split)
+    if (!SPONSOR_ID_LOJA || isNaN(SPONSOR_ID_LOJA)) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Configuração de split incompleta: MP_SPONSOR_ID_LOJA não configurado ou inválido",
+          hint: "Configure MP_SPONSOR_ID_LOJA nas variáveis de ambiente da Edge Function"
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
     }
 
+    // Gerar X-Idempotency-Key único para esta requisição
+    const idempotencyKey = `${referencia_externa}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+    // Usar API de Orders para suportar split tanto em PIX quanto em cartão
+    // A API de Orders suporta marketplace_fee que funciona para ambos os métodos
+    const orderData: any = {
+      type: "online",
+      total_amount: valor.toFixed(2),
+      external_reference: referencia_externa,
+      processing_mode: "automatic",
+      payer: {
+        email: email_cliente,
+      },
+      transactions: {
+        payments: []
+      },
+      marketplace: {
+        marketplace_fee: marketplace_fee.toFixed(2),
+      }
+    };
+
+    // Configurar pagamento baseado no método
     if (metodo_pagamento === "pix") {
-      dados_pagamento.payer = { email: email_cliente };
-      dados_pagamento.binary_mode = true;
-      dados_pagamento.additional_info = {
-        items: [
-          {
-            id: "1",
-            title: "Pagamento PIX",
-            description: "Pagamento PIX via BelezaHub",
-            quantity: 1,
-            unit_price: valor,
-          },
-        ],
-      };
+      orderData.transactions.payments.push({
+        amount: valor.toFixed(2),
+        payment_method: {
+          id: "pix",
+          type: "bank_transfer"
+        },
+        expiration_time: "P1D" // 24 horas para PIX
+      });
     } else if (metodo_pagamento === "credit_card") {
       if (!token_cartao) {
         return new Response(
@@ -258,12 +270,15 @@ serve(async (req: Request) => {
           }
         );
       }
-      dados_pagamento.token = token_cartao;
-      dados_pagamento.installments = 1;
-      dados_pagamento.payer = {
-        email: email_cliente,
-        identification: { type: "CPF", number: "12345678900" },
-      };
+      orderData.transactions.payments.push({
+        amount: valor.toFixed(2),
+        payment_method: {
+          id: "credit_card",
+          type: "credit_card"
+        },
+        token: token_cartao,
+        installments: 1
+      });
     } else {
       return new Response(
         JSON.stringify({ error: "Método de pagamento inválido. Use 'pix' ou 'credit_card'" }),
@@ -274,28 +289,31 @@ serve(async (req: Request) => {
       );
     }
 
-    // Gerar X-Idempotency-Key único para esta requisição
-    // Usar external_reference + timestamp para garantir unicidade
-    const idempotencyKey = `${referencia_externa}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    // Adiciona webhook URL se configurado
+    if (URL_WEBHOOK) {
+      orderData.notification_url = URL_WEBHOOK;
+    }
     
-    // Chamada para API do Mercado Pago
-    const mp_response = await fetch("https://api.mercadopago.com/v1/payments", {
+    // Chamada para API de Orders do Mercado Pago (suporta split nativamente)
+    const mp_response = await fetch("https://api.mercadopago.com/v1/orders", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
         "Content-Type": "application/json",
         "X-Idempotency-Key": idempotencyKey,
       },
-      body: JSON.stringify(dados_pagamento),
+      body: JSON.stringify(orderData),
     });
 
     const mp_result = await mp_response.json();
 
     if (!mp_response.ok) {
+      console.error("Erro na API de Orders do Mercado Pago:", mp_result);
       return new Response(
         JSON.stringify({ 
           error: mp_result.message || "Erro ao processar pagamento no Mercado Pago",
-          details: mp_result 
+          details: mp_result,
+          hint: mp_result.cause ? JSON.stringify(mp_result.cause) : undefined
         }), 
         {
           status: mp_response.status,
@@ -304,23 +322,40 @@ serve(async (req: Request) => {
       );
     }
 
+    // A API de Orders retorna estrutura diferente
+    // Extrair informações do pagamento da resposta
+    const payment = mp_result.transactions?.payments?.[0];
+    if (!payment) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Resposta inválida do Mercado Pago: pagamento não encontrado na ordem",
+          details: mp_result
+        }), 
+        {
+          status: 500,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        }
+      );
+    }
+
     // Salvar transação no banco de dados
-    const partner_net = valor - application_fee;
-    const transactionStatus = mp_result.status === "approved" ? "PAID" : 
-                            mp_result.status === "pending" ? "PENDING" : 
-                            mp_result.status === "rejected" ? "PENDING" : "PENDING";
+    const partner_net = valor - marketplace_fee;
+    const transactionStatus = payment.status === "approved" ? "PAID" : 
+                            payment.status === "pending" ? "PENDING" : 
+                            payment.status === "action_required" ? "PENDING" :
+                            payment.status === "rejected" ? "PENDING" : "PENDING";
 
     const { error: transactionError } = await supabase
       .from("transactions")
       .insert({
         business_id: business_id,
         amount: valor,
-        admin_fee: application_fee,
+        admin_fee: marketplace_fee,
         partner_net: partner_net,
         date: new Date().toISOString(),
         status: transactionStatus,
         gateway: "MERCADO_PAGO",
-        payment_id: mp_result.id.toString(),
+        payment_id: payment.id?.toString() || mp_result.id?.toString() || "",
         payment_method: metodo_pagamento === "pix" ? "pix" : "credit_card",
         customer_email: email_cliente,
         external_reference: referencia_externa,
@@ -333,18 +368,22 @@ serve(async (req: Request) => {
 
     // Retorna QR Code PIX ou resultado do cartão
     if (metodo_pagamento === "pix") {
-      const qrCode = mp_result.point_of_interaction?.transaction_data?.qr_code_base64;
-      const qrCodeBase64 = mp_result.point_of_interaction?.transaction_data?.qr_code;
+      // Para PIX via Orders API, o QR code está em payment_method
+      const qrCodeBase64 = payment.payment_method?.qr_code_base64;
+      const qrCode = payment.payment_method?.qr_code;
+      const ticketUrl = payment.payment_method?.ticket_url;
       
       return new Response(
         JSON.stringify({
           success: true,
-          qr_code_base64: qrCode || qrCodeBase64,
-          qr_code: mp_result.point_of_interaction?.transaction_data?.qr_code,
-          txid: mp_result.id.toString(),
-          payment_id: mp_result.id,
-          status: mp_result.status,
-          application_fee,
+          qr_code_base64: qrCodeBase64,
+          qr_code: qrCode,
+          ticket_url: ticketUrl,
+          txid: payment.id?.toString() || mp_result.id?.toString() || "",
+          payment_id: payment.id || mp_result.id,
+          status: payment.status,
+          application_fee: marketplace_fee,
+          order_id: mp_result.id,
         }),
         { 
           headers: { ...corsHeaders, "Content-Type": "application/json" } 
@@ -355,12 +394,13 @@ serve(async (req: Request) => {
     // Retorno para cartão de crédito
     return new Response(
       JSON.stringify({
-        success: mp_result.status === "approved",
-        payment_id: mp_result.id,
-        status: mp_result.status,
-        status_detail: mp_result.status_detail,
-        application_fee,
-        transaction_amount: mp_result.transaction_amount,
+        success: payment.status === "approved",
+        payment_id: payment.id || mp_result.id,
+        status: payment.status,
+        status_detail: payment.status_detail,
+        application_fee: marketplace_fee,
+        transaction_amount: payment.amount || valor,
+        order_id: mp_result.id,
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
