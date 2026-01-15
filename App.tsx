@@ -82,7 +82,7 @@ const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, i
           {cartCount > 0 && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full border-2 border-white animate-bounce">{cartCount}</span>}
         </button>
       )}
-      {user ? (
+      {user && (
         <div className="flex items-center gap-3">
           <div className="text-right hidden sm:block">
             <p className="text-sm font-semibold">{user.name}</p>
@@ -93,21 +93,6 @@ const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, i
             <LogOut size={20} />
           </button>
         </div>
-      ) : (
-        <button 
-          onClick={async () => {
-            try {
-              await signInWithGoogle();
-            } catch (error: any) {
-              console.error('Erro ao fazer login com Google:', error);
-              // Toast será mostrado pelo componente principal se necessário
-            }
-          }} 
-          className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-semibold hover:bg-indigo-700 shadow-md transition-all flex items-center gap-2"
-        >
-          <img src="https://www.google.com/favicon.ico" className="w-4 h-4 brightness-200" alt="" />
-          Google Login
-        </button>
       )}
     </div>
   </header>
@@ -4327,8 +4312,24 @@ export default function App() {
              <div className="bg-indigo-600 w-28 h-28 rounded-[2.5rem] flex items-center justify-center mx-auto text-white shadow-2xl rotate-12"><Zap size={56} fill="currentColor" /></div>
              <div><h2 className="text-4xl font-black tracking-tighter text-slate-900">Beleza<span className="text-indigo-600">Hub</span></h2><p className="text-slate-500 mt-4 font-medium text-lg leading-relaxed">Infraestrutura SaaS de Estética Integrada ao Supabase.</p></div>
              <div className="space-y-4">
-                {/* Botão de mock login removido - usar autenticação real */}
-                {/* <button onClick={() => mockLogin('CUSTOMER')} className="w-full flex items-center justify-center gap-4 bg-slate-900 text-white p-6 rounded-[1.8rem] font-black text-lg hover:bg-indigo-600 transition-all shadow-2xl active:scale-95">Sou Cliente</button> */}
+                <button 
+                  onClick={async () => {
+                    try {
+                      await signInWithGoogle('CUSTOMER');
+                    } catch (error: any) {
+                      console.error('Erro ao fazer login com Google:', error);
+                      setToast({
+                        message: error?.message?.includes('redirect') 
+                          ? 'Erro de configuração. Verifique o guia GOOGLE_OAUTH_SETUP.md'
+                          : 'Erro ao fazer login. Verifique se o Google OAuth está configurado no Supabase.',
+                        type: 'error'
+                      });
+                    }
+                  }}
+                  className="w-full flex items-center justify-center gap-4 bg-slate-900 text-white p-6 rounded-[1.8rem] font-black text-lg hover:bg-indigo-600 transition-all shadow-2xl active:scale-95"
+                >
+                  Sou Cliente
+                </button>
                 <div className="grid grid-cols-2 gap-3">
                   <button 
                     onClick={() => setShowBusinessLoginModal(true)} 
@@ -4343,24 +4344,6 @@ export default function App() {
                     Admin Central
                   </button>
                 </div>
-                <button 
-                  onClick={async () => {
-                    try {
-                      await signInWithGoogle('CUSTOMER');
-                    } catch (error: any) {
-                      console.error('Erro ao fazer login com Google:', error);
-                      addToast(
-                        error?.message?.includes('redirect') 
-                          ? 'Erro de configuração. Verifique o guia GOOGLE_OAUTH_SETUP.md'
-                          : 'Erro ao fazer login. Verifique se o Google OAuth está configurado no Supabase.',
-                        'error'
-                      );
-                    }
-                  }} 
-                  className="w-full flex items-center justify-center gap-2 text-slate-400 font-black text-xs mt-4 hover:text-indigo-600 transition-colors"
-                >
-                   <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="" /> Login Oficial Google
-                </button>
              </div>
           </div>
         </div>
