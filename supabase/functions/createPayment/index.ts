@@ -211,17 +211,25 @@ serve(async (req: Request) => {
     const COMISSAO_PERCENTUAL = business.revenue_split || 10;
 
     // Calcula split usando a porcentagem configurada no negócio
-    const application_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
+    // NOTA: application_fee não é suportado para PIX, apenas para cartão de crédito
+    const application_fee = metodo_pagamento === "credit_card" 
+      ? Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100
+      : 0;
 
     // Monta payload da API Mercado Pago
     const dados_pagamento: any = {
       transaction_amount: valor,
       description: `Pagamento ${business.name || "BelezaHub"} - ${business_id}`,
       payment_method_id: metodo_pagamento === "pix" ? "pix" : undefined,
-      application_fee,
-      sponsor_id: SPONSOR_ID_LOJA,
       external_reference: referencia_externa,
     };
+
+    // Adicionar application_fee e sponsor_id apenas para cartão de crédito
+    // PIX não suporta split de pagamento via application_fee
+    if (metodo_pagamento === "credit_card") {
+      dados_pagamento.application_fee = application_fee;
+      dados_pagamento.sponsor_id = SPONSOR_ID_LOJA;
+    }
 
     // Adiciona webhook URL se configurado
     if (URL_WEBHOOK) {
