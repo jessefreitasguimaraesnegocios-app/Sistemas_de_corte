@@ -3953,11 +3953,6 @@ export default function App() {
           console.error('Erro ao processar sessão:', error);
           setBusinessLoadTimeout(true);
         }
-        
-        // Se for BUSINESS_OWNER, buscar o business do banco
-        // Nota: userRole está definido dentro do try, então precisamos verificar novamente
-        const finalUserRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
-        if (finalUserRole === 'BUSINESS_OWNER' && session.user.id) {
           supabase
             .from('businesses')
             .select('*')
@@ -4000,11 +3995,6 @@ export default function App() {
                 setBusinessLoadTimeout(true);
               }
             })
-            .catch((error) => {
-              console.error('Erro ao buscar business:', error);
-              setBusinessLoadTimeout(true); // Marcar timeout em caso de erro
-            });
-        }
       } else {
         // Sem sessão, garantir que estados estão limpos
         setUser(null);
