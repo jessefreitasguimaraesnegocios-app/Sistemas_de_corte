@@ -1367,14 +1367,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
                       setBusinesses(updated);
                     }
                     
-                    // Atualizar o business atual se for o mesmo
-                    if (business.id === userBusiness?.id) {
-                      setUserBusiness({
-                        ...userBusiness,
-                        name: businessEditForm.name,
-                        image: businessEditForm.image || userBusiness.image
-                      });
-                    }
+                    // O business já foi atualizado na lista acima, não precisa atualizar userBusiness aqui
                     
                     addToast('Estabelecimento atualizado com sucesso!', 'success');
                     setShowBusinessEditModal(false);
@@ -3784,6 +3777,15 @@ export default function App() {
         } as Business & { mp_access_token?: string | null }));
         setBusinesses(businessesData as any);
         setBusinessLoadTimeout(false);
+        
+        // Se o usuário é BUSINESS_OWNER e ainda não tem userBusiness, tentar encontrar
+        if (user && user.role === 'BUSINESS_OWNER' && !userBusiness) {
+          const userBiz = businessesData.find(b => b.ownerId === user.id || b.id === user.businessId);
+          if (userBiz) {
+            setUserBusiness(userBiz as Business);
+            setBusinessLoadTimeout(false);
+          }
+        }
       } else {
         // Se não houver dados, usar array vazio (não usar dados mockados)
         setBusinesses([]);
@@ -3804,6 +3806,61 @@ export default function App() {
       setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
     } finally {
       setLoadingBusinesses(false);
+    }
+  }, []);
+
+  // Função para buscar business do usuário logado
+  const fetchUserBusiness = useCallback(async (userId: string) => {
+    if (!userId) return;
+    
+    try {
+      const { data: businessData, error: businessError } = await supabase
+        .from('businesses')
+        .select('*')
+        .eq('owner_id', userId)
+        .maybeSingle();
+      
+      if (businessError && businessError.code !== 'PGRST116') {
+        console.error('Erro ao buscar business do usuário:', businessError);
+        return null;
+      }
+      
+      if (businessData) {
+        const biz: Business & { mp_access_token?: string | null } = {
+          id: businessData.id,
+          name: businessData.name,
+          type: businessData.type as 'BARBERSHOP' | 'SALON',
+          description: businessData.description || '',
+          address: businessData.address || '',
+          image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
+          rating: Number(businessData.rating) || 0,
+          ownerId: businessData.owner_id,
+          monthlyFee: Number(businessData.monthly_fee) || 0,
+          revenueSplit: Number(businessData.revenue_split) || 10,
+          status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+          gatewayId: businessData.gateway_id,
+          lastPaymentDate: businessData.last_payment_date,
+          mp_access_token: businessData.mp_access_token || null,
+          mp_public_key: businessData.mp_public_key || null
+        };
+        
+        setUserBusiness(biz as Business);
+        setBusinessLoadTimeout(false);
+        setBusinesses(prev => {
+          const exists = prev.find(b => b.id === biz.id);
+          if (!exists) {
+            return [...prev, biz as Business];
+          }
+          return prev.map(b => b.id === biz.id ? (biz as Business) : b);
+        });
+        
+        return biz;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Erro ao buscar business do usuário:', error);
+      return null;
     }
   }, []);
 
@@ -4026,48 +4083,8 @@ export default function App() {
           
           // Se for BUSINESS_OWNER, buscar o business completo do banco
           if (userRole === 'BUSINESS_OWNER' && session.user.id) {
-            try {
-              const { data: businessData, error: businessError } = await supabase
-                .from('businesses')
-                .select('*')
-                .eq('owner_id', session.user.id)
-                .maybeSingle();
-              
-              if (businessError && businessError.code !== 'PGRST116') {
-                console.error('Erro ao buscar business completo:', businessError);
-                setBusinessLoadTimeout(true);
-              } else if (businessData) {
-                const biz: Business & { mp_access_token?: string | null } = {
-                  id: businessData.id,
-                  name: businessData.name,
-                  type: businessData.type as 'BARBERSHOP' | 'SALON',
-                  description: businessData.description || '',
-                  address: businessData.address || '',
-                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
-                  rating: Number(businessData.rating) || 0,
-                  ownerId: businessData.owner_id,
-                  monthlyFee: Number(businessData.monthly_fee) || 0,
-                  revenueSplit: Number(businessData.revenue_split) || 10,
-                  status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
-                  gatewayId: businessData.gateway_id,
-                  lastPaymentDate: businessData.last_payment_date,
-                mp_access_token: businessData.mp_access_token || null,
-                mp_public_key: businessData.mp_public_key || null
-              };
-            setUserBusiness(biz as Business);
-                setBusinessLoadTimeout(false);
-                setBusinesses(prev => {
-                  const exists = prev.find(b => b.id === biz.id);
-                  if (!exists) {
-                    return [...prev, biz as Business];
-                  }
-                  return prev.map(b => b.id === biz.id ? (biz as Business) : b);
-                });
-              } else {
-                setBusinessLoadTimeout(true);
-              }
-            } catch (error) {
-              console.error('Erro ao buscar business completo:', error);
+            const biz = await fetchUserBusiness(session.user.id);
+            if (!biz) {
               setBusinessLoadTimeout(true);
             }
           }
@@ -4075,48 +4092,6 @@ export default function App() {
           console.error('Erro ao processar sessão:', error);
           setBusinessLoadTimeout(true);
         }
-          supabase
-            .from('businesses')
-            .select('*')
-            .eq('owner_id', session.user.id)
-            .maybeSingle()
-            .then(({ data: businessData, error }) => {
-              if (error && error.code !== 'PGRST116') {
-                console.error('Erro ao buscar business:', error);
-                // Não bloquear o fluxo
-              } else if (businessData) {
-                const biz: Business & { mp_access_token?: string | null } = {
-                  id: businessData.id,
-                  name: businessData.name,
-                  type: businessData.type as 'BARBERSHOP' | 'SALON',
-                  description: businessData.description || '',
-                  address: businessData.address || '',
-                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
-                  rating: Number(businessData.rating) || 0,
-                  ownerId: businessData.owner_id,
-                  monthlyFee: Number(businessData.monthly_fee) || 0,
-                  revenueSplit: Number(businessData.revenue_split) || 10,
-                  status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
-                  gatewayId: businessData.gateway_id,
-                  lastPaymentDate: businessData.last_payment_date,
-                mp_access_token: businessData.mp_access_token || null,
-                mp_public_key: businessData.mp_public_key || null
-              };
-            setUserBusiness(biz as Business);
-                setBusinessLoadTimeout(false); // Reset timeout quando encontrar
-                // Atualizar lista de businesses
-                setBusinesses(prev => {
-                  const exists = prev.find(b => b.id === biz.id);
-                  if (!exists) {
-                    return [...prev, biz];
-                  }
-                  return prev.map(b => b.id === biz.id ? biz : b);
-                });
-              } else {
-                // Business não encontrado
-                setBusinessLoadTimeout(true);
-              }
-            })
       } else {
         // Sem sessão, garantir que estados estão limpos
         setUser(null);
@@ -4128,6 +4103,24 @@ export default function App() {
       setBusinessLoadTimeout(true);
     });
   }, []);
+
+  // Buscar business do usuário quando ele faz login como BUSINESS_OWNER
+  useEffect(() => {
+    if (user && user.role === 'BUSINESS_OWNER' && user.id && !userBusiness && !loadingBusinesses) {
+      // Aguardar um pouco para garantir que fetchBusinesses terminou
+      const timer = setTimeout(async () => {
+        const biz = await fetchUserBusiness(user.id);
+        if (!biz && !businessLoadTimeout) {
+          // Se não encontrou e ainda não deu timeout, tentar novamente após um delay
+          setTimeout(async () => {
+            await fetchUserBusiness(user.id);
+          }, 2000);
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
 
   // Buscar dados quando um business é selecionado
   useEffect(() => {
@@ -4469,6 +4462,7 @@ export default function App() {
                             }
                             return prev.map(b => b.id === biz.id ? biz : b);
                           });
+                          setLoadingBusinesses(false);
                           addToast('Estabelecimento carregado com sucesso!', 'success');
                         } else {
                           addToast('Estabelecimento não encontrado. Entre em contato com o suporte.', 'error');
