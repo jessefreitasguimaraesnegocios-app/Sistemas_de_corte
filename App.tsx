@@ -2235,6 +2235,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       status: business.status || 'ACTIVE',
       isPaused: isPaused,
       mpAccessToken: (business as any).mp_access_token || '',
+      mpPublicKey: (business as any).mp_public_key || '',
       description: business.description || '',
       address: business.address || ''
     });
@@ -2270,6 +2271,13 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
         tokenValue = null;
       }
       updateData.mp_access_token = tokenValue;
+      
+      // mp_public_key - sempre incluir, mesmo se vazio (para permitir limpar a public key)
+      let publicKeyValue = editForm.mpPublicKey?.trim();
+      if (publicKeyValue === '' || !publicKeyValue) {
+        publicKeyValue = null;
+      }
+      updateData.mp_public_key = publicKeyValue;
       
       // Log para debug - mostrar exatamente o que será enviado
       console.log('💾 Salvando configurações do business:', {
@@ -2337,6 +2345,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
             description: editForm.description,
             address: editForm.address,
             mp_access_token: editForm.mpAccessToken,
+            mp_public_key: editForm.mpPublicKey,
             isPaused: editForm.status === 'SUSPENDED'
           };
         }
@@ -3004,6 +3013,17 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                   />
                   <p className="text-xs text-slate-500 mt-2">Token de acesso do Mercado Pago deste estabelecimento</p>
                 </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-2">Public Key do Mercado Pago</label>
+                  <input
+                    type="text"
+                    value={editForm.mpPublicKey || ''}
+                    onChange={(e) => setEditForm({...editForm, mpPublicKey: e.target.value})}
+                    placeholder="TEST-... ou APP_USR-..."
+                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                  />
+                  <p className="text-xs text-slate-500 mt-2">Public key do Mercado Pago para uso no SDK do frontend. Obtenha no painel do desenvolvedor</p>
+                </div>
               </section>
 
               {/* Controle de Pausa Individual */}
@@ -3493,8 +3513,9 @@ export default function App() {
           status: b.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
           gatewayId: b.gateway_id,
           lastPaymentDate: b.last_payment_date,
-          // Preservar mp_access_token para uso no formulário de edição
-          mp_access_token: b.mp_access_token || null
+          // Preservar mp_access_token e mp_public_key para uso no formulário de edição
+          mp_access_token: b.mp_access_token || null,
+          mp_public_key: b.mp_public_key || null
         } as Business & { mp_access_token?: string | null }));
         setBusinesses(businessesData as any);
         setBusinessLoadTimeout(false);
@@ -3637,7 +3658,8 @@ export default function App() {
                 status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                 gatewayId: businessData.gateway_id,
                 lastPaymentDate: businessData.last_payment_date,
-                mp_access_token: businessData.mp_access_token || null
+                mp_access_token: businessData.mp_access_token || null,
+                mp_public_key: businessData.mp_public_key || null
               };
             setUserBusiness(biz as Business);
             setBusinessLoadTimeout(false); // Reset timeout quando encontrar
@@ -3762,9 +3784,10 @@ export default function App() {
                   status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                   gatewayId: businessData.gateway_id,
                   lastPaymentDate: businessData.last_payment_date,
-                  mp_access_token: businessData.mp_access_token || null
-                };
-                setUserBusiness(biz as Business);
+                mp_access_token: businessData.mp_access_token || null,
+                mp_public_key: businessData.mp_public_key || null
+              };
+            setUserBusiness(biz as Business);
                 setBusinessLoadTimeout(false);
                 setBusinesses(prev => {
                   const exists = prev.find(b => b.id === biz.id);
@@ -3812,9 +3835,10 @@ export default function App() {
                   status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                   gatewayId: businessData.gateway_id,
                   lastPaymentDate: businessData.last_payment_date,
-                  mp_access_token: businessData.mp_access_token || null
-                };
-                setUserBusiness(biz as Business);
+                mp_access_token: businessData.mp_access_token || null,
+                mp_public_key: businessData.mp_public_key || null
+              };
+            setUserBusiness(biz as Business);
                 setBusinessLoadTimeout(false); // Reset timeout quando encontrar
                 // Atualizar lista de businesses
                 setBusinesses(prev => {
@@ -4173,9 +4197,10 @@ export default function App() {
                             status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                             gatewayId: businessData.gateway_id,
                             lastPaymentDate: businessData.last_payment_date,
-                            mp_access_token: businessData.mp_access_token || null
-                          };
-                          setUserBusiness(biz as Business);
+                mp_access_token: businessData.mp_access_token || null,
+                mp_public_key: businessData.mp_public_key || null
+              };
+            setUserBusiness(biz as Business);
                           setBusinessLoadTimeout(false);
                           setBusinesses(prev => {
                             const exists = prev.find(b => b.id === biz.id);

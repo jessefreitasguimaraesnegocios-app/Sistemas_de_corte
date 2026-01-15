@@ -108,6 +108,7 @@ serve(async (req: Request) => {
       "description",
       "address",
       "mp_access_token",
+      "mp_public_key",
     ]);
 
     const sanitized: Record<string, unknown> = {};
@@ -126,6 +127,17 @@ serve(async (req: Request) => {
         delete sanitized.mp_access_token;
       }
     }
+    
+    // Normalizar mp_public_key (string vazia => null)
+    if ("mp_public_key" in sanitized) {
+      const v = sanitized.mp_public_key;
+      if (typeof v === "string") {
+        const trimmed = v.trim();
+        sanitized.mp_public_key = trimmed ? trimmed : null;
+      } else if (v === undefined) {
+        delete sanitized.mp_public_key;
+      }
+    }
 
     // Debug sem vazar token
     const tokenLen = typeof sanitized.mp_access_token === "string" ? sanitized.mp_access_token.length : 0;
@@ -141,7 +153,7 @@ serve(async (req: Request) => {
       .from("businesses")
       .update(sanitized)
       .eq("id", business_id)
-      .select("id, name, status, mp_access_token")
+      .select("id, name, status, mp_access_token, mp_public_key")
       .single();
 
     if (updError) {
