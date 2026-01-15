@@ -3847,7 +3847,7 @@ export default function App() {
       if (session?.user) {
         try {
           const roleParam = new URLSearchParams(window.location.search).get('role');
-          let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
+          let userRole: UserRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
           let businessId = session.user.user_metadata.business_id;
           
           if (roleParam === 'BUSINESS_OWNER' || window.localStorage.getItem('pending_role') === 'BUSINESS_OWNER') {
@@ -3955,7 +3955,9 @@ export default function App() {
         }
         
         // Se for BUSINESS_OWNER, buscar o business do banco
-        if (userRole === 'BUSINESS_OWNER' && session.user.id) {
+        // Nota: userRole está definido dentro do try, então precisamos verificar novamente
+        const finalUserRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
+        if (finalUserRole === 'BUSINESS_OWNER' && session.user.id) {
           supabase
             .from('businesses')
             .select('*')
