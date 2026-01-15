@@ -34,6 +34,13 @@ export interface Business {
   status: 'ACTIVE' | 'PENDING' | 'SUSPENDED';
   gatewayId?: string; // ID of the account on the gateway
   lastPaymentDate?: string;
+  // Mercado Pago (OAuth)
+  mp_access_token?: string | null;
+  mp_refresh_token?: string | null;
+  mp_public_key?: string | null;
+  mp_user_id?: string | null;
+  mp_live_mode?: boolean | null;
+  mp_token_expires_at?: string | null;
 }
 
 export interface Service {

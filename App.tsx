@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import { Routes, Route, useLocation } from 'react-router-dom';
 import { 
   LayoutGrid, Calendar, ShoppingBag, Settings, Users, DollarSign, LogOut, 
   Plus, Search, Star, Clock, Menu, X, TrendingUp, CreditCard, AlertCircle, 
@@ -15,6 +16,7 @@ import { User, Business, Service, Product, Appointment, Collaborator, UserRole, 
 import { generateBusinessDescription } from './services/geminiService';
 import { supabase, signInWithGoogle, signInWithEmail, signUpWithEmail, signOut, updatePassword } from './lib/supabase';
 import CheckoutModal from './components/CheckoutModal';
+import OAuthCallback from './components/OAuthCallback';
 
 // --- TYPES ---
 interface CartItem {
@@ -367,6 +369,71 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
+  // Configuração OAuth Mercado Pago
+  const mpClientId = import.meta.env.VITE_MP_CLIENT_ID;
+  const buildMpRedirectUri = () => {
+    return `${window.location.origin}/oauth/callback`;
+  };
+
+  const handleStartMpOauth = () => {
+    if (!business?.id) {
+      addToast('Erro: Estabelecimento não encontrado', 'error');
+      return;
+    }
+    if (!mpClientId) {
+      addToast('Configure VITE_MP_CLIENT_ID no .env', 'error');
+      return;
+    }
+    const redirectUri = buildMpRedirectUri();
+    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(mpClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(business.id)}&platform_id=mp&prompt=login`;
+    window.location.href = oauthUrl;
+  };
+
+  const handleDisconnectMp = async () => {
+    if (!business?.id) return;
+    
+    if (!confirm('Tem certeza que deseja desconectar o Mercado Pago? Você precisará reconectar para receber pagamentos.')) {
+      return;
+    }
+
+    try {
+      const { error } = await supabase
+        .from('businesses')
+        .update({
+          mp_access_token: null,
+          mp_refresh_token: null,
+          mp_public_key: null,
+          mp_user_id: null,
+          mp_live_mode: null,
+          mp_token_expires_at: null
+        })
+        .eq('id', business.id);
+
+      if (error) throw error;
+
+      // Atualizar business local
+      const updatedBusiness = {
+        ...business,
+        mp_access_token: null,
+        mp_refresh_token: null,
+        mp_public_key: null,
+        mp_user_id: null,
+        mp_live_mode: null,
+        mp_token_expires_at: null
+      };
+      
+      setBusinesses(businesses.map((b: any) => b.id === business.id ? updatedBusiness : b));
+      addToast('Mercado Pago desconectado com sucesso', 'success');
+    } catch (error: any) {
+      console.error('Erro ao desconectar Mercado Pago:', error);
+      addToast('Erro ao desconectar Mercado Pago', 'error');
+    }
+  };
+
+  // Verificar status de conexão
+  const isMpConnected = !!(business?.mp_access_token);
+  const mpLiveMode = business?.mp_live_mode;
+
   // Buscar email do usuário
   useEffect(() => {
     const fetchUserEmail = async () => {
@@ -378,10 +445,10 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     fetchUserEmail();
   }, []);
 
-  // Atualizar formulário quando business mudar
+  // Atualizar formulário quando business mudar (incluindo após OAuth)
   useEffect(() => {
     setBusinessEditForm({ name: business.name, image: business.image });
-  }, [business.name, business.image]);
+  }, [business.name, business.image, business.mp_access_token]);
 
   // Buscar serviços do banco de dados
   const fetchServices = useCallback(async () => {
@@ -940,6 +1007,89 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
               </h3>
 
               <div className="space-y-6">
+                {/* Integração Mercado Pago */}
+                <div className={`p-6 rounded-2xl border-2 ${
+                  isMpConnected 
+                    ? 'bg-green-50 border-green-200' 
+                    : 'bg-slate-50 border-slate-200'
+                }`}>
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <h4 className="text-lg font-black text-slate-900">Integração Mercado Pago</h4>
+                        {isMpConnected ? (
+                          <span className="px-3 py-1 rounded-full bg-green-600 text-white text-xs font-black flex items-center gap-1">
+                            <CheckCircle2 size={12} />
+                            Conectado
+                          </span>
+                        ) : (
+                          <span className="px-3 py-1 rounded-full bg-red-100 text-red-700 text-xs font-black flex items-center gap-1">
+                            <AlertCircle size={12} />
+                            Não Conectado
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-sm text-slate-600 mb-4">
+                        {isMpConnected 
+                          ? 'Seu estabelecimento está conectado ao Mercado Pago e pode receber pagamentos.'
+                          : 'Conecte sua conta do Mercado Pago para receber pagamentos de clientes.'}
+                      </p>
+                      
+                      {isMpConnected && (
+                        <div className="space-y-2 text-sm">
+                          {mpLiveMode !== undefined && mpLiveMode !== null && (
+                            <div className="flex items-center gap-2 text-slate-600">
+                              <span className="font-bold">Ambiente:</span>
+                              <span className={`px-2 py-1 rounded-full text-xs font-black ${
+                                mpLiveMode 
+                                  ? 'bg-blue-100 text-blue-700' 
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {mpLiveMode ? 'Produção' : 'Teste'}
+                              </span>
+                            </div>
+                          )}
+                          {business?.mp_user_id && (
+                            <div className="flex items-center gap-2 text-slate-600">
+                              <span className="font-bold">User ID:</span>
+                              <span className="font-mono text-xs">{business.mp_user_id}</span>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  
+                  <div className="flex gap-3">
+                    {!isMpConnected ? (
+                      <button
+                        onClick={handleStartMpOauth}
+                        className="px-6 py-3 bg-emerald-600 text-white rounded-xl font-black text-sm hover:bg-emerald-700 transition-all shadow-lg flex items-center gap-2"
+                      >
+                        <ExternalLink size={16} />
+                        Conectar ao Mercado Pago
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={handleStartMpOauth}
+                          className="px-6 py-3 bg-indigo-600 text-white rounded-xl font-black text-sm hover:bg-indigo-700 transition-all shadow-lg flex items-center gap-2"
+                        >
+                          <RefreshCw size={16} />
+                          Reconectar
+                        </button>
+                        <button
+                          onClick={handleDisconnectMp}
+                          className="px-6 py-3 bg-red-600 text-white rounded-xl font-black text-sm hover:bg-red-700 transition-all shadow-lg flex items-center gap-2"
+                        >
+                          <X size={16} />
+                          Desconectar
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
                 <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
                   <div className="flex items-center justify-between mb-4">
                     <div>
@@ -2517,8 +2667,6 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       monthlyFee: business.monthlyFee || 150,
       status: business.status || 'ACTIVE',
       isPaused: isPaused,
-      mpAccessToken: (business as any).mp_access_token || '',
-      mpPublicKey: (business as any).mp_public_key || '',
       description: business.description || '',
       address: business.address || '',
       image: business.image || '' // Adicionar campo image ao editForm
@@ -2552,32 +2700,15 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       if (editForm.image !== undefined) {
         updateData.image = editForm.image || null;
       }
-      // mp_access_token - sempre incluir, mesmo se vazio (para permitir limpar o token)
-      // Garantir que string vazia vira null (PostgreSQL trata melhor null)
-      let tokenValue = editForm.mpAccessToken?.trim();
-      if (tokenValue === '' || !tokenValue) {
-        tokenValue = null;
-      }
-      updateData.mp_access_token = tokenValue;
       
-      // mp_public_key - sempre incluir, mesmo se vazio (para permitir limpar a public key)
-      let publicKeyValue = editForm.mpPublicKey?.trim();
-      if (publicKeyValue === '' || !publicKeyValue) {
-        publicKeyValue = null;
-      }
-      updateData.mp_public_key = publicKeyValue;
+      // NOTA: mp_access_token e mp_public_key NÃO são editados aqui
+      // Eles só podem ser atualizados via OAuth no painel do estabelecimento
       
-      // Log para debug - mostrar exatamente o que será enviado
+      // Log para debug
       console.log('💾 Salvando configurações do business:', {
         business_id: editingBusiness.id,
         business_name: editForm.name,
-        mp_access_token_raw: editForm.mpAccessToken,
-        mp_access_token_trimmed: tokenValue ? `${tokenValue.substring(0, 20)}...` : 'null',
-        token_length: tokenValue?.length || 0,
-        token_type: typeof tokenValue,
-        updateData_keys: Object.keys(updateData),
-        updateData_mp_token: updateData.mp_access_token ? 'PRESENTE' : 'NULL',
-        updateData_full: JSON.stringify(updateData).substring(0, 200) + '...'
+        updateData_keys: Object.keys(updateData)
       });
 
       // Atualizar no Supabase via Edge Function (bypass RLS)
@@ -2612,15 +2743,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
 
       console.log('✅ updateBusinessConfig OK:', fnData);
 
-      // Se quiser confirmar no banco via SELECT, pode continuar usando o verify abaixo,
-      // mas o retorno da função já traz has_token/token_length.
-      const hasToken = !!fnData?.business?.has_token;
-      if (tokenValue && !hasToken) {
-        console.warn('⚠️ ATENÇÃO: Token foi enviado mas a função retornou has_token=false');
-        addToast('Token não foi confirmado no banco. Verifique as permissões/políticas.', 'error');
-      }
-
-      // Atualizar o negócio na lista local
+      // Atualizar o negócio na lista local (preservar tokens existentes)
       const updatedBusinesses = businesses.map((b: Business) => {
         if (b.id === editingBusiness.id) {
           return {
@@ -2632,8 +2755,8 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
             status: editForm.status,
             description: editForm.description,
             address: editForm.address,
-            mp_access_token: editForm.mpAccessToken,
-            mp_public_key: editForm.mpPublicKey,
+            image: editForm.image || b.image,
+            // Preservar tokens existentes (não são editados aqui)
             isPaused: editForm.status === 'SUSPENDED'
           };
         }
@@ -2786,27 +2909,57 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                         <span className="text-indigo-600 font-black text-xs">{b.revenueSplit}% Taxa</span>
                       </div>
                       
-                      {/* Toggle de Pausar/Ativar Rápido */}
-                      <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
-                        <div className="flex items-center gap-2">
-                          <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-green-500'}`}></div>
-                          <span className="text-xs font-bold text-slate-700">{isPaused ? 'Pausado' : 'Ativo'}</span>
+                      {/* Status do Estabelecimento */}
+                      <div className="space-y-2">
+                        {/* Toggle de Pausar/Ativar Rápido */}
+                        <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
+                          <div className="flex items-center gap-2">
+                            <div className={`w-2 h-2 rounded-full ${isPaused ? 'bg-amber-500' : 'bg-green-500'}`}></div>
+                            <span className="text-xs font-bold text-slate-700">{isPaused ? 'Pausado' : 'Ativo'}</span>
+                          </div>
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input 
+                              type="checkbox" 
+                              checked={!isPaused}
+                              onChange={(e) => {
+                                // Abrir modal de confirmação
+                                setConfirmPauseModal({
+                                  business: b,
+                                  action: e.target.checked ? 'activate' : 'pause'
+                                });
+                              }}
+                              className="sr-only peer" 
+                            />
+                            <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
+                          </label>
                         </div>
-                        <label className="relative inline-flex items-center cursor-pointer">
-                          <input 
-                            type="checkbox" 
-                            checked={!isPaused}
-                            onChange={(e) => {
-                              // Abrir modal de confirmação
-                              setConfirmPauseModal({
-                                business: b,
-                                action: e.target.checked ? 'activate' : 'pause'
-                              });
-                            }}
-                            className="sr-only peer" 
-                          />
-                          <div className="w-11 h-6 bg-slate-300 peer-focus:outline-none peer-focus:ring-4 peer-focus:ring-indigo-300 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-indigo-600"></div>
-                        </label>
+                        
+                        {/* Status Mercado Pago */}
+                        <div className={`p-2 rounded-lg flex items-center justify-between ${
+                          (b as any).mp_access_token 
+                            ? 'bg-green-50 border border-green-200' 
+                            : 'bg-red-50 border border-red-200'
+                        }`}>
+                          <div className="flex items-center gap-2">
+                            {(b as any).mp_access_token ? (
+                              <CheckCircle2 className="text-green-600" size={14} />
+                            ) : (
+                              <AlertCircle className="text-red-600" size={14} />
+                            )}
+                            <span className="text-xs font-bold text-slate-700">
+                              {(b as any).mp_access_token ? '🟢 Conectado' : '🔴 Não Conectado'}
+                            </span>
+                          </div>
+                          {(b as any).mp_live_mode !== undefined && (b as any).mp_live_mode !== null && (
+                            <span className={`text-[10px] font-black px-1.5 py-0.5 rounded ${
+                              (b as any).mp_live_mode 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {(b as any).mp_live_mode ? 'Prod' : 'Teste'}
+                            </span>
+                          )}
+                        </div>
                       </div>
 
                       <div className="grid grid-cols-2 gap-3">
@@ -3423,31 +3576,55 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                 </div>
               </section>
 
-              {/* Integração Mercado Pago */}
+              {/* Status Integração Mercado Pago (Apenas Visualização) */}
               <section className="space-y-4">
-                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Integração Mercado Pago</h4>
-                
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Access Token do Mercado Pago</label>
-                  <input
-                    type="text"
-                    value={editForm.mpAccessToken || ''}
-                    onChange={(e) => setEditForm({...editForm, mpAccessToken: e.target.value})}
-                    placeholder="APP_USR-..."
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <p className="text-xs text-slate-500 mt-2">Token de acesso do Mercado Pago deste estabelecimento</p>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-2">Public Key do Mercado Pago</label>
-                  <input
-                    type="text"
-                    value={editForm.mpPublicKey || ''}
-                    onChange={(e) => setEditForm({...editForm, mpPublicKey: e.target.value})}
-                    placeholder="TEST-... ou APP_USR-..."
-                    className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl font-mono text-sm text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  />
-                  <p className="text-xs text-slate-500 mt-2">Public key do Mercado Pago para uso no SDK do frontend. Obtenha no painel do desenvolvedor</p>
+                <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Status Mercado Pago</h4>
+
+                <div className={`p-4 rounded-xl border-2 ${
+                  editingBusiness?.mp_access_token 
+                    ? 'bg-green-50 border-green-200' 
+                    : 'bg-red-50 border-red-200'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      {editingBusiness?.mp_access_token ? (
+                        <CheckCircle2 className="text-green-600" size={24} />
+                      ) : (
+                        <AlertCircle className="text-red-600" size={24} />
+                      )}
+                      <div>
+                        <p className="font-black text-slate-900">
+                          {editingBusiness?.mp_access_token ? '🟢 Conectado ao Mercado Pago' : '🔴 Não conectado'}
+                        </p>
+                        <p className="text-sm text-slate-600 mt-1">
+                          {editingBusiness?.mp_access_token 
+                            ? 'O estabelecimento está conectado e pode receber pagamentos.'
+                            : 'O estabelecimento precisa conectar sua conta Mercado Pago no painel próprio.'}
+                        </p>
+                        {editingBusiness?.mp_access_token && editingBusiness?.mp_live_mode !== undefined && editingBusiness?.mp_live_mode !== null && (
+                          <div className="mt-2 flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-600">Ambiente:</span>
+                            <span className={`px-2 py-1 rounded-full text-xs font-black ${
+                              editingBusiness?.mp_live_mode 
+                                ? 'bg-blue-100 text-blue-700' 
+                                : 'bg-amber-100 text-amber-700'
+                            }`}>
+                              {editingBusiness?.mp_live_mode ? 'Produção' : 'Teste'}
+                            </span>
+                          </div>
+                        )}
+                        {editingBusiness?.mp_user_id && (
+                          <div className="mt-1 flex items-center gap-2">
+                            <span className="text-xs font-bold text-slate-600">User ID:</span>
+                            <span className="text-xs font-mono text-slate-700">{editingBusiness.mp_user_id}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3 italic">
+                    💡 O dono do estabelecimento deve conectar via OAuth no painel próprio (Configurações → Integração Mercado Pago)
+                  </p>
                 </div>
               </section>
 
@@ -3943,10 +4120,13 @@ export default function App() {
           status: b.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
           gatewayId: b.gateway_id,
           lastPaymentDate: b.last_payment_date,
-          // Preservar mp_access_token e mp_public_key para uso no formulário de edição
           mp_access_token: b.mp_access_token || null,
-          mp_public_key: b.mp_public_key || null
-        } as Business & { mp_access_token?: string | null }));
+          mp_refresh_token: b.mp_refresh_token || null,
+          mp_public_key: b.mp_public_key || null,
+          mp_user_id: b.mp_user_id || null,
+          mp_live_mode: b.mp_live_mode ?? null,
+          mp_token_expires_at: b.mp_token_expires_at || null
+        }));
         setBusinesses(businessesData as any);
         setBusinessLoadTimeout(false);
         
@@ -3998,7 +4178,7 @@ export default function App() {
       }
       
       if (businessData) {
-        const biz: Business & { mp_access_token?: string | null } = {
+        const biz: Business = {
           id: businessData.id,
           name: businessData.name,
           type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -4013,7 +4193,11 @@ export default function App() {
           gatewayId: businessData.gateway_id,
           lastPaymentDate: businessData.last_payment_date,
           mp_access_token: businessData.mp_access_token || null,
-          mp_public_key: businessData.mp_public_key || null
+          mp_refresh_token: businessData.mp_refresh_token || null,
+          mp_public_key: businessData.mp_public_key || null,
+          mp_user_id: businessData.mp_user_id || null,
+          mp_live_mode: businessData.mp_live_mode ?? null,
+          mp_token_expires_at: businessData.mp_token_expires_at || null
         };
         
         setUserBusiness(biz as Business);
@@ -4264,25 +4448,29 @@ export default function App() {
               if (businessError && businessError.code !== 'PGRST116') {
                 console.error('Erro ao buscar business:', businessError);
                 // Não bloquear o fluxo, apenas logar o erro
-              } else if (businessData) {
-              const biz: Business & { mp_access_token?: string | null } = {
-                id: businessData.id,
-                name: businessData.name,
-                type: businessData.type as 'BARBERSHOP' | 'SALON',
-                description: businessData.description || '',
-                address: businessData.address || '',
-                image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
-                rating: Number(businessData.rating) || 0,
-                ownerId: businessData.owner_id,
-                monthlyFee: Number(businessData.monthly_fee) || 0,
-                revenueSplit: Number(businessData.revenue_split) || 10,
-                status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
-                gatewayId: businessData.gateway_id,
-                lastPaymentDate: businessData.last_payment_date,
-                mp_access_token: businessData.mp_access_token || null,
-                mp_public_key: businessData.mp_public_key || null
-              };
-            setUserBusiness(biz as Business);
+            } else if (businessData) {
+            const biz: Business = {
+              id: businessData.id,
+              name: businessData.name,
+              type: businessData.type as 'BARBERSHOP' | 'SALON',
+              description: businessData.description || '',
+              address: businessData.address || '',
+              image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
+              rating: Number(businessData.rating) || 0,
+              ownerId: businessData.owner_id,
+              monthlyFee: Number(businessData.monthly_fee) || 0,
+              revenueSplit: Number(businessData.revenue_split) || 10,
+              status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
+              gatewayId: businessData.gateway_id,
+              lastPaymentDate: businessData.last_payment_date,
+              mp_access_token: businessData.mp_access_token || null,
+              mp_refresh_token: businessData.mp_refresh_token || null,
+              mp_public_key: businessData.mp_public_key || null,
+              mp_user_id: businessData.mp_user_id || null,
+              mp_live_mode: businessData.mp_live_mode ?? null,
+              mp_token_expires_at: businessData.mp_token_expires_at || null
+            };
+          setUserBusiness(biz as Business);
             setBusinessLoadTimeout(false); // Reset timeout quando encontrar
             // Atualizar lista de businesses
             setBusinesses(prev => {
@@ -4593,6 +4781,7 @@ export default function App() {
     }
   };
 
+
   // Calcula total do carrinho
   const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
 
@@ -4749,7 +4938,7 @@ export default function App() {
                         }
                         
                         if (businessData) {
-                          const biz: Business & { mp_access_token?: string | null } = {
+                          const biz: Business = {
                             id: businessData.id,
                             name: businessData.name,
                             type: businessData.type as 'BARBERSHOP' | 'SALON',
@@ -4763,10 +4952,14 @@ export default function App() {
                             status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
                             gatewayId: businessData.gateway_id,
                             lastPaymentDate: businessData.last_payment_date,
-                mp_access_token: businessData.mp_access_token || null,
-                mp_public_key: businessData.mp_public_key || null
-              };
-            setUserBusiness(biz as Business);
+                            mp_access_token: businessData.mp_access_token || null,
+                            mp_refresh_token: businessData.mp_refresh_token || null,
+                            mp_public_key: businessData.mp_public_key || null,
+                            mp_user_id: businessData.mp_user_id || null,
+                            mp_live_mode: businessData.mp_live_mode ?? null,
+                            mp_token_expires_at: businessData.mp_token_expires_at || null
+                          };
+                          setUserBusiness(biz);
                           setBusinessLoadTimeout(false);
                           setBusinesses(prev => {
                             const exists = prev.find(b => b.id === biz.id);
@@ -4882,6 +5075,25 @@ export default function App() {
       </div>
     );
   };
+
+  const location = useLocation();
+
+  // Se estiver na rota de callback OAuth, renderizar apenas o componente de callback
+  if (location.pathname === '/oauth/callback') {
+    return <OAuthCallback />;
+  }
+
+  // Recarregar business após OAuth bem-sucedido
+  useEffect(() => {
+    if (location.state?.oauthSuccess && user?.role === 'BUSINESS_OWNER' && user?.id) {
+      // Recarregar business do usuário após OAuth
+      fetchUserBusiness(user.id).then(() => {
+        addToast(location.state?.message || 'Mercado Pago conectado com sucesso!', 'success');
+        // Limpar state para não recarregar novamente
+        window.history.replaceState({}, document.title, location.pathname);
+      });
+    }
+  }, [location.state, user, fetchUserBusiness, addToast]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">

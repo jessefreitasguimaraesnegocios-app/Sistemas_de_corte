@@ -27,16 +27,19 @@ COMMENT ON COLUMN notifications.read IS 'Se a notificação foi lida pelo usuár
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 
 -- Política: Usuários só podem ver suas próprias notificações
+DROP POLICY IF EXISTS "Users can view their own notifications" ON notifications;
 CREATE POLICY "Users can view their own notifications"
   ON notifications FOR SELECT
   USING (auth.uid()::text = user_id);
 
 -- Política: Service role pode criar notificações
+DROP POLICY IF EXISTS "Service role can create notifications" ON notifications;
 CREATE POLICY "Service role can create notifications"
   ON notifications FOR INSERT
   WITH CHECK (true);
 
 -- Política: Usuários podem atualizar suas próprias notificações (marcar como lida)
+DROP POLICY IF EXISTS "Users can update their own notifications" ON notifications;
 CREATE POLICY "Users can update their own notifications"
   ON notifications FOR UPDATE
   USING (auth.uid()::text = user_id);
