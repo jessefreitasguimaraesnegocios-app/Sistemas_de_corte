@@ -106,7 +106,7 @@ As credenciais do Mercado Pago devem ser configuradas como **secrets** nas Edge 
 ```
 MP_ACCESS_TOKEN_VENDEDOR=seu-access-token-vendedor-aqui
 MP_SPONSOR_ID_LOJA=user-id-da-conta-sponsor-aqui
-MP_WEBHOOK_URL=https://seu-projeto.supabase.co/functions/v1/webhook-payment (opcional)
+MP_WEBHOOK_URL=https://seu-projeto.supabase.co/functions/v1/mercadopago-webhook (opcional)
 ```
 
 ### 3.2 Via CLI (Alternativa):

@@ -1961,7 +1961,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
   // Estados para configurações
   const [defaultSplit, setDefaultSplit] = useState(10);
   const [sponsorId, setSponsorId] = useState('2622924811');
-  const [webhookUrl, setWebhookUrl] = useState('https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/webhook-payment');
+  const [webhookUrl, setWebhookUrl] = useState('https://hgkvhgjtjsycbpeglrrs.supabase.co/functions/v1/mercadopago-webhook');
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [autoApprove, setAutoApprove] = useState(true);
