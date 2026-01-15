@@ -234,6 +234,7 @@ serve(async (req: Request) => {
 
     // Usar API de Orders para suportar split tanto em PIX quanto em cartão
     // A API de Orders suporta marketplace_fee que funciona para ambos os métodos
+    // marketplace_fee deve estar no nível raiz da ordem, não dentro de marketplace
     const orderData: any = {
       type: "online",
       total_amount: valor.toFixed(2),
@@ -244,11 +245,13 @@ serve(async (req: Request) => {
       },
       transactions: {
         payments: []
-      },
-      marketplace: {
-        marketplace_fee: marketplace_fee.toFixed(2),
       }
     };
+
+    // Adicionar marketplace_fee no nível raiz da ordem para split
+    if (marketplace_fee > 0) {
+      orderData.marketplace_fee = marketplace_fee.toFixed(2);
+    }
 
     // Configurar pagamento baseado no método
     if (metodo_pagamento === "pix") {
@@ -270,6 +273,7 @@ serve(async (req: Request) => {
           }
         );
       }
+      
       orderData.transactions.payments.push({
         amount: valor.toFixed(2),
         payment_method: {
@@ -287,11 +291,6 @@ serve(async (req: Request) => {
           headers: { ...corsHeaders, "Content-Type": "application/json" } 
         }
       );
-    }
-
-    // Adiciona webhook URL se configurado
-    if (URL_WEBHOOK) {
-      orderData.notification_url = URL_WEBHOOK;
     }
     
     // Chamada para API de Orders do Mercado Pago (suporta split nativamente)
