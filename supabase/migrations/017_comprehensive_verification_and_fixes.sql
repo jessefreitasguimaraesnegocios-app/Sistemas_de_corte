@@ -147,27 +147,22 @@ END $$;
 -- Garantir que RLS está habilitado
 ALTER TABLE user_profiles ENABLE ROW LEVEL SECURITY;
 
--- Verificar se a função is_super_admin existe
-DO $$
+-- Verificar se a função is_super_admin existe e criar se não existir
+-- Não podemos criar função dentro de DO $$, então criamos diretamente
+CREATE OR REPLACE FUNCTION is_super_admin()
+RETURNS BOOLEAN
+LANGUAGE plpgsql
+SECURITY DEFINER
+STABLE
+AS $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'is_super_admin') THEN
-    CREATE OR REPLACE FUNCTION is_super_admin()
-    RETURNS BOOLEAN
-    LANGUAGE plpgsql
-    SECURITY DEFINER
-    STABLE
-    AS $$
-    BEGIN
-      RETURN EXISTS (
-        SELECT 1 FROM user_profiles
-        WHERE user_profiles.id = auth.uid()
-        AND user_profiles.role = 'SUPER_ADMIN'
-      );
-    END;
-    $$;
-    RAISE NOTICE 'Função is_super_admin() criada';
-  END IF;
-END $$;
+  RETURN EXISTS (
+    SELECT 1 FROM user_profiles
+    WHERE user_profiles.id = auth.uid()
+    AND user_profiles.role = 'SUPER_ADMIN'
+  );
+END;
+$$;
 
 -- Garantir permissões na função
 GRANT EXECUTE ON FUNCTION is_super_admin() TO authenticated;
