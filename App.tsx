@@ -370,23 +370,35 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   // Configuração OAuth Mercado Pago
-  const mpClientId = import.meta.env.VITE_MP_CLIENT_ID;
-  const buildMpRedirectUri = () => {
-    return `${window.location.origin}/oauth/callback`;
-  };
-
-  const handleStartMpOauth = () => {
+  const handleStartMpOauth = async () => {
     if (!business?.id) {
       addToast('Erro: Estabelecimento não encontrado', 'error');
       return;
     }
-    if (!mpClientId) {
-      addToast('Configure VITE_MP_CLIENT_ID no .env', 'error');
-      return;
+
+    try {
+      // Chamar Edge Function para obter URL de OAuth
+      const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
+        body: { business_id: business.id }
+      });
+
+      if (error) {
+        console.error('Erro ao obter URL OAuth:', error);
+        addToast('Erro ao conectar ao Mercado Pago. Verifique a configuração.', 'error');
+        return;
+      }
+
+      if (!data?.oauth_url) {
+        addToast('Erro: URL de OAuth não retornada', 'error');
+        return;
+      }
+
+      // Redirecionar para URL de OAuth
+      window.location.href = data.oauth_url;
+    } catch (err: any) {
+      console.error('Erro ao iniciar OAuth:', err);
+      addToast('Erro ao conectar ao Mercado Pago', 'error');
     }
-    const redirectUri = buildMpRedirectUri();
-    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(mpClientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&state=${encodeURIComponent(business.id)}&platform_id=mp&prompt=login`;
-    window.location.href = oauthUrl;
   };
 
   const handleDisconnectMp = async () => {
