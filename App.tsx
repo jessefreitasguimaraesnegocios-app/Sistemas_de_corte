@@ -1372,24 +1372,53 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
               </div>
 
               <button
-                onClick={() => {
+                onClick={async () => {
                   if (!businessEditForm.name) {
                     addToast('Preencha o nome do estabelecimento', 'error');
                     return;
                   }
                   
-                  // Atualizar o estabelecimento na lista
-                  if (setBusinesses && businesses) {
-                    const updated = businesses.map((b: any) => 
-                      b.id === business.id 
-                        ? { ...b, name: businessEditForm.name, image: businessEditForm.image || b.image }
-                        : b
-                    );
-                    setBusinesses(updated);
+                  try {
+                    // Atualizar no banco de dados
+                    const { error: updateError } = await supabase
+                      .from('businesses')
+                      .update({
+                        name: businessEditForm.name,
+                        image: businessEditForm.image || null
+                      })
+                      .eq('id', business.id);
+                    
+                    if (updateError) {
+                      console.error('Erro ao atualizar estabelecimento:', updateError);
+                      addToast('Erro ao salvar alterações. Tente novamente.', 'error');
+                      return;
+                    }
+                    
+                    // Atualizar o estabelecimento na lista local
+                    if (setBusinesses && businesses) {
+                      const updated = businesses.map((b: any) => 
+                        b.id === business.id 
+                          ? { ...b, name: businessEditForm.name, image: businessEditForm.image || b.image }
+                          : b
+                      );
+                      setBusinesses(updated);
+                    }
+                    
+                    // Atualizar o business atual se for o mesmo
+                    if (business.id === userBusiness?.id) {
+                      setUserBusiness({
+                        ...userBusiness,
+                        name: businessEditForm.name,
+                        image: businessEditForm.image || userBusiness.image
+                      });
+                    }
+                    
+                    addToast('Estabelecimento atualizado com sucesso!', 'success');
+                    setShowBusinessEditModal(false);
+                  } catch (error: any) {
+                    console.error('Erro ao atualizar estabelecimento:', error);
+                    addToast('Erro ao salvar alterações. Tente novamente.', 'error');
                   }
-                  
-                  addToast('Estabelecimento atualizado com sucesso!', 'success');
-                  setShowBusinessEditModal(false);
                 }}
                 className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all"
               >
@@ -2343,7 +2372,8 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       mpAccessToken: (business as any).mp_access_token || '',
       mpPublicKey: (business as any).mp_public_key || '',
       description: business.description || '',
-      address: business.address || ''
+      address: business.address || '',
+      image: business.image || '' // Adicionar campo image ao editForm
     });
   };
 
@@ -2369,6 +2399,10 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       }
       if (editForm.address !== undefined) {
         updateData.address = editForm.address || null;
+      }
+      // Adicionar campo image se tiver valor
+      if (editForm.image !== undefined) {
+        updateData.image = editForm.image || null;
       }
       // mp_access_token - sempre incluir, mesmo se vazio (para permitir limpar o token)
       // Garantir que string vazia vira null (PostgreSQL trata melhor null)
@@ -3079,6 +3113,75 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
               {/* Informações Básicas */}
               <section className="space-y-4">
                 <h4 className="text-lg font-black text-slate-900 border-b border-slate-200 pb-2">Informações Básicas</h4>
+                
+                {/* Foto do Estabelecimento */}
+                <div className="flex flex-col items-center gap-4">
+                  <div className="relative group">
+                    <div className="w-32 h-32 rounded-2xl overflow-hidden shadow-lg border-2 border-slate-200 bg-slate-100 flex items-center justify-center">
+                      {editForm.image ? (
+                        <img 
+                          src={editForm.image} 
+                          alt="Foto do estabelecimento" 
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = 'https://via.placeholder.com/128';
+                          }}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-100 to-purple-100">
+                          <Image className="text-indigo-400" size={40} />
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="w-full">
+                    <label className="flex items-center gap-2 text-xs font-black text-slate-700 uppercase tracking-widest mb-2">
+                      <Camera size={14} />
+                      Foto do Estabelecimento
+                    </label>
+                    <label className="block">
+                      <input 
+                        type="file" 
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            if (file.size > 5 * 1024 * 1024) {
+                              addToast('A imagem deve ter no máximo 5MB', 'error');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onloadend = () => {
+                              setEditForm({...editForm, image: reader.result as string});
+                            };
+                            reader.onerror = () => {
+                              addToast('Erro ao carregar a imagem', 'error');
+                            };
+                            reader.readAsDataURL(file);
+                          }
+                        }}
+                      />
+                      <div className="w-full p-4 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl font-medium text-slate-700 hover:bg-indigo-50 hover:border-indigo-400 transition-all cursor-pointer text-center">
+                        <div className="flex flex-col items-center gap-2">
+                          <Camera className="text-indigo-600" size={24} />
+                          <span className="text-sm font-bold">
+                            {editForm.image ? 'Trocar Foto' : 'Selecionar da Galeria'}
+                          </span>
+                        </div>
+                      </div>
+                    </label>
+                    {editForm.image && (
+                      <button
+                        onClick={() => setEditForm({...editForm, image: ''})}
+                        className="mt-2 text-xs text-red-500 hover:text-red-700 font-bold flex items-center gap-1"
+                      >
+                        <X size={12} />
+                        Remover foto
+                      </button>
+                    )}
+                  </div>
+                </div>
                 
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-2">Nome do Estabelecimento</label>

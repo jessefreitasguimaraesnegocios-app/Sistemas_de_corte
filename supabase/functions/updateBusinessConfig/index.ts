@@ -107,6 +107,7 @@ serve(async (req: Request) => {
       "status",
       "description",
       "address",
+      "image",
       "mp_access_token",
       "mp_public_key",
     ]);
@@ -153,7 +154,7 @@ serve(async (req: Request) => {
       .from("businesses")
       .update(sanitized)
       .eq("id", business_id)
-      .select("id, name, status, mp_access_token, mp_public_key")
+      .select("id, name, status, image, mp_access_token, mp_public_key")
       .single();
 
     if (updError) {
