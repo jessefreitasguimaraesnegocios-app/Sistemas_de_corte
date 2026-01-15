@@ -10,22 +10,48 @@ RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 AS $$
+DECLARE
+  rows_updated INTEGER;
+  final_status TEXT;
 BEGIN
+  -- VERIFICAÇÃO CRÍTICA: Apenas marcar como PAID quando status === "approved"
+  final_status := CASE 
+    WHEN status_param = 'approved' THEN 'PAID'
+    WHEN status_param = 'pending' THEN 'PENDING'
+    WHEN status_param = 'rejected' OR status_param = 'cancelled' THEN 'PENDING'
+    WHEN status_param = 'refunded' THEN 'REFUNDED'
+    ELSE 'PENDING'
+  END;
+  
   -- Atualiza o status da transação baseado no webhook do Mercado Pago
+  -- Primeiro tenta pelo payment_id
   UPDATE transactions
   SET 
-    status = CASE 
-      WHEN status_param = 'approved' THEN 'PAID'
-      WHEN status_param = 'pending' THEN 'PENDING'
-      WHEN status_param = 'rejected' OR status_param = 'cancelled' THEN 'PENDING'
-      WHEN status_param = 'refunded' THEN 'REFUNDED'
-      ELSE status
-    END,
+    status = final_status,
     updated_at = NOW()
   WHERE transactions.payment_id = payment_id_param;
   
-  -- Log da atualização (opcional - pode criar uma tabela de logs)
-  RAISE NOTICE 'Transaction % updated to status: %', payment_id_param, status_param;
+  GET DIAGNOSTICS rows_updated = ROW_COUNT;
+  
+  -- Se não encontrou pelo payment_id, tentar pelo external_reference
+  -- (pode ser que o payment_id salvo seja diferente ou seja um order_id)
+  IF rows_updated = 0 THEN
+    UPDATE transactions
+    SET 
+      status = final_status,
+      payment_id = payment_id_param, -- Atualizar o payment_id também
+      updated_at = NOW()
+    WHERE transactions.external_reference = payment_id_param;
+    
+    GET DIAGNOSTICS rows_updated = ROW_COUNT;
+  END IF;
+  
+  -- Log da atualização
+  IF rows_updated > 0 THEN
+    RAISE NOTICE 'Transaction % updated to status: % (final: %)', payment_id_param, status_param, final_status;
+  ELSE
+    RAISE WARNING 'Transaction % not found - no rows updated', payment_id_param;
+  END IF;
 END;
 $$;
 

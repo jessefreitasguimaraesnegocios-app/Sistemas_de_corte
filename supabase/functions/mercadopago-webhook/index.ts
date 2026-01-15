@@ -234,14 +234,14 @@ serve(async (req: Request) => {
       // Buscar business para obter access token e buscar status atualizado
       const { data: business, error: businessError } = await supabase
         .from("businesses")
-        .select("mp_access_token")
+        .select("mp_access_token, mp_access_token_test")
         .eq("id", transaction.business_id)
         .single();
 
-      if (businessError || !business?.mp_access_token) {
+      if (businessError || (!business?.mp_access_token && !business?.mp_access_token_test)) {
         console.error("❌ Business não encontrado ou sem token:", businessError);
         return new Response(
-          JSON.stringify({ error: "Business não encontrado" }),
+          JSON.stringify({ error: "Business não encontrado ou sem token configurado" }),
           {
             status: 404,
             headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -249,14 +249,29 @@ serve(async (req: Request) => {
         );
       }
 
-      // Buscar status atualizado no Mercado Pago
-      const mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
+      // Primeiro, buscar payment para verificar live_mode
+      // Tentar com token de produção primeiro
+      let accessToken = business.mp_access_token || business.mp_access_token_test;
+      let mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
         method: "GET",
         headers: {
-          "Authorization": `Bearer ${business.mp_access_token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
       });
+
+      // Se falhar com token de produção, tentar com token de teste
+      if (!mp_response.ok && business.mp_access_token_test && business.mp_access_token_test !== business.mp_access_token) {
+        console.log("⚠️ Tentando com token de teste...");
+        accessToken = business.mp_access_token_test;
+        mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
 
       if (!mp_response.ok) {
         console.error("❌ Erro ao buscar payment no Mercado Pago:", await mp_response.text());
@@ -272,11 +287,43 @@ serve(async (req: Request) => {
       const paymentData = await mp_response.json();
       const status = paymentData.status; // approved, pending, rejected, cancelled, refunded
       const statusDetail = paymentData.status_detail;
+      const liveMode = paymentData.live_mode; // true = produção, false = teste
 
-      console.log(`✅ Atualizando transação ${resourceId} para status: ${status}`);
+      // VERIFICAÇÃO DE AMBIENTE: Verificar se o token corresponde ao ambiente
+      const isProductionToken = accessToken?.startsWith("APP_USR-");
+      const isTestToken = accessToken?.startsWith("TEST-");
+      
+      if (liveMode === true && isTestToken) {
+        console.warn("⚠️ ATENÇÃO: Payment de PRODUÇÃO sendo buscado com token de TESTE!");
+        console.warn("⚠️ Configure mp_access_token (produção) no business para pagamentos reais.");
+      } else if (liveMode === false && isProductionToken) {
+        console.warn("⚠️ ATENÇÃO: Payment de TESTE sendo buscado com token de PRODUÇÃO!");
+        console.warn("⚠️ Configure mp_access_token_test no business para pagamentos de teste.");
+      } else {
+        console.log(`✅ Ambiente correto: ${liveMode ? "PRODUÇÃO" : "TESTE"} com token ${isProductionToken ? "PRODUÇÃO" : "TESTE"}`);
+      }
 
-      // Chamar função SQL para atualizar status
+      console.log(`📊 Payment Data:`, {
+        payment_id: resourceId,
+        status: status,
+        live_mode: liveMode,
+        status_detail: statusDetail,
+        environment_match: (liveMode && isProductionToken) || (!liveMode && isTestToken)
+      });
+
+      // VERIFICAÇÃO CRÍTICA: Apenas confirmar quando status === "approved"
+      if (status !== "approved") {
+        console.log(`⚠️ Payment não aprovado. Status: ${status}. Não será marcado como PAID.`);
+      } else {
+        console.log(`✅ Payment APROVADO! Marcando transação como PAID.`);
+      }
+
+      console.log(`🔄 Atualizando transação ${resourceId} para status: ${status} (live_mode: ${liveMode})`);
+
+      // IMPORTANTE: Processar atualização ANTES de responder HTTP 200
+      // O Mercado Pago espera resposta rápida, mas precisamos garantir que a atualização foi feita
       let updateError = null;
+      let updateSuccess = false;
       try {
         const { error: rpcError } = await supabase.rpc("process_mercado_pago_webhook", {
           payment_id_param: resourceId.toString(),
@@ -284,6 +331,10 @@ serve(async (req: Request) => {
           status_detail_param: statusDetail || null,
         });
         updateError = rpcError;
+        if (!rpcError) {
+          updateSuccess = true;
+          console.log(`✅ Transação atualizada via RPC. Status final: ${status === "approved" ? "PAID" : "PENDING"}`);
+        }
       } catch (rpcException) {
         console.error("❌ Exceção ao chamar RPC:", rpcException);
         updateError = rpcException;
@@ -293,10 +344,13 @@ serve(async (req: Request) => {
       if (updateError) {
         console.warn("⚠️ Função RPC falhou, tentando atualizar diretamente:", updateError);
         
+        // VERIFICAÇÃO CRÍTICA: Apenas marcar como PAID quando status === "approved"
         const statusToUpdate = status === "approved" ? "PAID" :
                               status === "pending" ? "PENDING" :
                               status === "rejected" || status === "cancelled" ? "PENDING" :
                               status === "refunded" ? "REFUNDED" : "PENDING";
+        
+        console.log(`💾 Atualizando transação para: ${statusToUpdate} (status original: ${status})`);
 
         const { error: directUpdateError } = await supabase
           .from("transactions")
@@ -348,19 +402,29 @@ serve(async (req: Request) => {
           }
         } else {
           console.log("✅ Transação atualizada diretamente");
+          updateSuccess = true;
         }
       } else {
-        console.log("✅ Transação atualizada via função RPC");
+        updateSuccess = true;
       }
 
+      // IMPORTANTE: Sempre responder HTTP 200 rapidamente
+      // O Mercado Pago espera resposta rápida (< 5 segundos)
+      // Mesmo se houver erro na atualização, responder 200 para evitar retentativas
+      const finalStatus = status === "approved" ? "PAID" : "PENDING";
+      
       return new Response(
         JSON.stringify({ 
           success: true,
           message: "Webhook processado com sucesso",
           payment_id: resourceId,
-          status: status
+          status: status,
+          final_status: finalStatus,
+          updated: updateSuccess,
+          live_mode: liveMode
         }),
         {
+          status: 200, // Sempre retornar 200 para webhook
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         }
       );
@@ -394,14 +458,14 @@ serve(async (req: Request) => {
       // Buscar business para obter access token
       const { data: business, error: businessError } = await supabase
         .from("businesses")
-        .select("mp_access_token")
+        .select("mp_access_token, mp_access_token_test")
         .eq("id", transaction.business_id)
         .single();
 
-      if (businessError || !business?.mp_access_token) {
+      if (businessError || (!business?.mp_access_token && !business?.mp_access_token_test)) {
         console.error("❌ Business não encontrado ou sem token:", businessError);
         return new Response(
-          JSON.stringify({ error: "Business não encontrado" }),
+          JSON.stringify({ error: "Business não encontrado ou sem token configurado" }),
           {
             status: 404,
             headers: { ...corsHeaders, "Content-Type": "application/json" }
@@ -409,14 +473,28 @@ serve(async (req: Request) => {
         );
       }
 
-      // Buscar order no Mercado Pago para obter os payments dentro dela
-      const order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
+      // Tentar com token de produção primeiro
+      let accessToken = business.mp_access_token || business.mp_access_token_test;
+      let order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
         method: "GET",
         headers: {
-          "Authorization": `Bearer ${business.mp_access_token}`,
+          "Authorization": `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
       });
+
+      // Se falhar, tentar com token de teste
+      if (!order_response.ok && business.mp_access_token_test && business.mp_access_token_test !== business.mp_access_token) {
+        console.log("⚠️ Tentando buscar order com token de teste...");
+        accessToken = business.mp_access_token_test;
+        order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${accessToken}`,
+            "Content-Type": "application/json",
+          },
+        });
+      }
 
       if (!order_response.ok) {
         console.error("❌ Erro ao buscar order no Mercado Pago:", await order_response.text());
@@ -431,27 +509,48 @@ serve(async (req: Request) => {
 
       const orderData = await order_response.json();
       const payments = orderData.payments || [];
+      const liveMode = orderData.live_mode; // true = produção, false = teste
       
-      // Atualizar status baseado no status da order
-      // Se algum payment está approved, a order está aprovada
+      // VERIFICAÇÃO DE AMBIENTE
+      const isProductionToken = accessToken?.startsWith("APP_USR-");
+      const isTestToken = accessToken?.startsWith("TEST-");
+      
+      if (liveMode === true && isTestToken) {
+        console.warn("⚠️ ATENÇÃO: Order de PRODUÇÃO sendo buscada com token de TESTE!");
+      } else if (liveMode === false && isProductionToken) {
+        console.warn("⚠️ ATENÇÃO: Order de TESTE sendo buscada com token de PRODUÇÃO!");
+      } else {
+        console.log(`✅ Ambiente correto: ${liveMode ? "PRODUÇÃO" : "TESTE"} com token ${isProductionToken ? "PRODUÇÃO" : "TESTE"}`);
+      }
+      
+      // VERIFICAÇÃO CRÍTICA: Apenas confirmar quando algum payment tem status === "approved"
       const hasApprovedPayment = payments.some((p: any) => p.status === "approved");
       const hasRejectedPayment = payments.every((p: any) => p.status === "rejected" || p.status === "cancelled");
       
       let status = "pending";
       if (hasApprovedPayment) {
         status = "approved";
+        console.log(`✅ Order APROVADA! Algum payment está approved. Marcando transação como PAID.`);
       } else if (hasRejectedPayment && payments.length > 0) {
         status = "rejected";
+        console.log(`⚠️ Order rejeitada. Todos os payments foram rejected/cancelled.`);
+      } else {
+        console.log(`⏳ Order pendente. Status: ${status}`);
       }
 
-      console.log(`✅ Atualizando transação da order ${resourceId} para status: ${status}`);
+      console.log(`🔄 Atualizando transação da order ${resourceId} para status: ${status} (live_mode: ${liveMode}, payments: ${payments.length})`);
 
       // Atualizar payment_id se ainda não estiver salvo (usar o primeiro payment aprovado)
       const approvedPayment = payments.find((p: any) => p.status === "approved");
       const paymentIdToUpdate = approvedPayment?.id?.toString() || payments[0]?.id?.toString();
 
-      // Chamar função SQL para atualizar status
+      // IMPORTANTE: Processar atualização ANTES de responder HTTP 200
+      let updateSuccess = false;
       if (paymentIdToUpdate) {
+        // VERIFICAÇÃO CRÍTICA: Apenas marcar como PAID quando status === "approved"
+        const finalStatus = status === "approved" ? "PAID" : "PENDING";
+        console.log(`💾 Atualizando transação da order. Status final: ${finalStatus} (status original: ${status})`);
+        
         const { error: updateError } = await supabase.rpc("process_mercado_pago_webhook", {
           payment_id_param: paymentIdToUpdate,
           status_param: status,
@@ -459,12 +558,12 @@ serve(async (req: Request) => {
         });
 
         if (updateError) {
-          console.error("❌ Erro ao atualizar transação:", updateError);
+          console.error("❌ Erro ao atualizar transação via RPC:", updateError);
           // Tentar atualizar diretamente pelo external_reference
           const { error: directUpdateError } = await supabase
             .from("transactions")
             .update({
-              status: status === "approved" ? "PAID" : "PENDING",
+              status: finalStatus,
               payment_id: paymentIdToUpdate,
               updated_at: new Date().toISOString()
             })
@@ -472,14 +571,26 @@ serve(async (req: Request) => {
 
           if (directUpdateError) {
             console.error("❌ Erro ao atualizar transação diretamente:", directUpdateError);
+            // Mesmo com erro, responder 200 para evitar retentativas do Mercado Pago
             return new Response(
-              JSON.stringify({ error: "Erro ao atualizar transação", details: directUpdateError }),
+              JSON.stringify({ 
+                success: false,
+                error: "Erro ao atualizar transação", 
+                details: directUpdateError,
+                note: "Webhook recebido mas atualização falhou. Verifique logs."
+              }),
               {
-                status: 500,
+                status: 200, // Sempre 200 para webhook
                 headers: { ...corsHeaders, "Content-Type": "application/json" }
               }
             );
+          } else {
+            updateSuccess = true;
+            console.log("✅ Transação atualizada diretamente pelo external_reference");
           }
+        } else {
+          updateSuccess = true;
+          console.log("✅ Transação atualizada via função RPC");
         }
       }
 
@@ -489,9 +600,12 @@ serve(async (req: Request) => {
           message: "Webhook de Order processado com sucesso",
           order_id: resourceId,
           status: status,
-          payments_count: payments.length
+          final_status: status === "approved" ? "PAID" : "PENDING",
+          payments_count: payments.length,
+          live_mode: liveMode
         }),
         {
+          status: 200, // Sempre retornar 200 para webhook
           headers: { ...corsHeaders, "Content-Type": "application/json" }
         }
       );

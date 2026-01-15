@@ -49,7 +49,7 @@ const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 
 
 // --- COMPONENTS ---
 
-const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, isMenuOpen }: any) => (
+const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, isMenuOpen, notificationCount, onOpenNotifications }: any) => (
   <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-6 sticky top-0 z-50">
     <div className="flex items-center gap-4">
       {onBack && (
@@ -74,13 +74,32 @@ const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, i
     </div>
     <div className="flex items-center gap-4">
       {user && user.role === 'CUSTOMER' && (
-        <button 
-          onClick={onOpenCart}
-          className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-all active:scale-90"
-        >
-          <ShoppingBag size={22} />
-          {cartCount > 0 && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full border-2 border-white animate-bounce">{cartCount}</span>}
-        </button>
+        <>
+          {/* Ícone de Notificações */}
+          <button 
+            onClick={onOpenNotifications}
+            className={`relative p-2 rounded-full transition-all active:scale-90 ${
+              notificationCount > 0 
+                ? 'text-indigo-600 hover:bg-indigo-50' 
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Bell size={22} className={notificationCount > 0 ? 'fill-current' : ''} />
+            {notificationCount > 0 && (
+              <span className="absolute top-0 right-0 bg-indigo-600 text-white text-[10px] font-black w-5 h-5 flex items-center justify-center rounded-full border-2 border-white animate-pulse">
+                {notificationCount > 9 ? '9+' : notificationCount}
+              </span>
+            )}
+          </button>
+          {/* Ícone do Carrinho */}
+          <button 
+            onClick={onOpenCart}
+            className="relative p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-all active:scale-90"
+          >
+            <ShoppingBag size={22} />
+            {cartCount > 0 && <span className="absolute top-0 right-0 bg-rose-500 text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded-full border-2 border-white animate-bounce">{cartCount}</span>}
+          </button>
+        </>
       )}
       {user && (
         <div className="flex items-center gap-3">
@@ -97,6 +116,142 @@ const Navbar = ({ user, onLogout, onBack, cartCount, onOpenCart, onMenuToggle, i
     </div>
   </header>
 );
+
+// Componente de Notificações
+const NotificationsDrawer = ({ isOpen, onClose, notifications, onMarkAsRead, onMarkAllAsRead }: any) => {
+  if (!isOpen) return null;
+
+  const unreadCount = notifications.filter((n: any) => !n.read).length;
+
+  return (
+    <div className="fixed inset-0 z-[300] overflow-hidden">
+      <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="absolute inset-y-0 right-0 max-w-full flex">
+        <div className="w-screen max-w-md animate-in slide-in-from-right duration-300">
+          <div className="h-full flex flex-col bg-white shadow-2xl">
+            <div className="flex-1 py-8 overflow-y-auto px-8">
+              <div className="flex items-start justify-between mb-8">
+                <div>
+                  <h2 className="text-2xl font-black text-slate-900 tracking-tighter">Notificações</h2>
+                  {unreadCount > 0 && (
+                    <p className="text-sm text-slate-500 mt-1">{unreadCount} não lida{unreadCount > 1 ? 's' : ''}</p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {unreadCount > 0 && (
+                    <button 
+                      onClick={onMarkAllAsRead}
+                      className="text-xs font-bold text-indigo-600 hover:text-indigo-700 px-3 py-1 rounded-lg hover:bg-indigo-50 transition-colors"
+                    >
+                      Marcar todas como lidas
+                    </button>
+                  )}
+                  <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-500"><X size={24} /></button>
+                </div>
+              </div>
+
+              {notifications.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                  <Bell size={64} className="mb-4 opacity-20" />
+                  <p className="font-bold">Nenhuma notificação ainda.</p>
+                </div>
+              ) : (
+                <div className="space-y-4">
+                  {notifications.map((notification: any) => (
+                    <div
+                      key={notification.id}
+                      onClick={() => !notification.read && onMarkAsRead(notification.id)}
+                      className={`p-5 rounded-2xl border-2 transition-all cursor-pointer ${
+                        notification.read
+                          ? 'bg-slate-50 border-slate-100'
+                          : 'bg-indigo-50 border-indigo-200 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-start gap-4">
+                        <div className={`p-3 rounded-xl ${
+                          notification.type === 'APPOINTMENT'
+                            ? 'bg-green-100 text-green-600'
+                            : 'bg-blue-100 text-blue-600'
+                        }`}>
+                          {notification.type === 'APPOINTMENT' ? (
+                            <Calendar size={20} />
+                          ) : (
+                            <ShoppingBag size={20} />
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <h3 className={`font-black text-sm ${
+                              notification.read ? 'text-slate-600' : 'text-slate-900'
+                            }`}>
+                              {notification.title}
+                            </h3>
+                            {!notification.read && (
+                              <div className="w-2 h-2 bg-indigo-600 rounded-full flex-shrink-0 mt-1.5" />
+                            )}
+                          </div>
+                          <p className="text-sm text-slate-600 mb-3">{notification.message}</p>
+                          
+                          {/* Dados adicionais */}
+                          {notification.data && (
+                            <div className="space-y-2 text-xs">
+                              {notification.type === 'APPOINTMENT' && (
+                                <>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <Clock size={14} />
+                                    <span>{notification.data.date} às {notification.data.time}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <Scissors size={14} />
+                                    <span>{notification.data.service_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <UserCheck size={14} />
+                                    <span>{notification.data.collaborator_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <LayoutGrid size={14} />
+                                    <span>{notification.data.business_name}</span>
+                                  </div>
+                                </>
+                              )}
+                              {notification.type === 'PURCHASE' && (
+                                <>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <DollarSign size={14} />
+                                    <span className="font-bold text-green-600">R$ {Number(notification.data.amount).toFixed(2)}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <LayoutGrid size={14} />
+                                    <span>{notification.data.business_name}</span>
+                                  </div>
+                                  <div className="flex items-center gap-2 text-slate-500">
+                                    <Clock size={14} />
+                                    <span>{new Date(notification.data.date).toLocaleDateString('pt-BR', { 
+                                      day: '2-digit', 
+                                      month: '2-digit', 
+                                      year: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit'
+                                    })}</span>
+                                  </div>
+                                </>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, onCheckout, accentBg }: any) => {
   const total = cartItems.reduce((acc: number, item: CartItem) => acc + (item.product.price * item.quantity), 0);
@@ -1544,7 +1699,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
 // --- CUSTOMER VIEW ---
 
-const BusinessDetailView = ({ business, collaborators, services, products, appointments, setAppointments, onBack, addToast, addToCart, user }: any) => {
+const BusinessDetailView = ({ business, collaborators, services, products, appointments, setAppointments, onBack, addToast, addToCart, user, createAppointmentNotification }: any) => {
   const [activeSubTab, setActiveSubTab] = useState<'SERVICES' | 'STORE'>('SERVICES');
   const [selectedPro, setSelectedPro] = useState<Collaborator | null>(null);
   const [bookingService, setBookingService] = useState<Service | null>(null);
@@ -1645,7 +1800,7 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
     setShowCheckout(true);
   };
 
-  const handlePaymentSuccess = () => {
+  const handlePaymentSuccess = async () => {
     if (!selectedDate || !selectedTime || !bookingService || !selectedPro) return;
 
     const app: Appointment = {
@@ -1660,6 +1815,19 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
     };
     setAppointments([...appointments, app]);
     addToast('Agendamento confirmado com sucesso!', 'success');
+    
+    // Criar notificação de agendamento
+    if (user?.id && createAppointmentNotification) {
+      await createAppointmentNotification(
+        user.id,
+        business.name,
+        business.type,
+        selectedPro.name,
+        bookingService.name,
+        selectedDate,
+        selectedTime
+      );
+    }
     
     // Resetar estado
     setBookingService(null);
@@ -3627,6 +3795,10 @@ export default function App() {
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   
+  // Notifications State Management
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false);
+  
   const [toast, setToast] = useState<{ message: string, type: 'success' | 'error' } | null>(null);
   const [showBusinessLoginModal, setShowBusinessLoginModal] = useState(false);
   const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
@@ -3864,6 +4036,126 @@ export default function App() {
     }
   }, []);
 
+  // Função para buscar notificações do usuário
+  const fetchNotifications = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(50);
+
+      if (error) {
+        console.error('Erro ao buscar notificações:', error);
+        return;
+      }
+
+      if (data) {
+        setNotifications(data);
+      }
+    } catch (error) {
+      console.error('Erro ao buscar notificações:', error);
+    }
+  }, []);
+
+  // Função para criar notificação de agendamento
+  const createAppointmentNotification = useCallback(async (
+    userId: string,
+    businessName: string,
+    businessType: string,
+    collaboratorName: string,
+    serviceName: string,
+    date: Date,
+    time: string
+  ) => {
+    try {
+      const { error } = await supabase.rpc('create_appointment_notification', {
+        p_user_id: userId,
+        p_business_name: businessName,
+        p_business_type: businessType,
+        p_collaborator_name: collaboratorName,
+        p_service_name: serviceName,
+        p_date: date.toISOString().split('T')[0],
+        p_time: time
+      });
+
+      if (error) {
+        console.error('Erro ao criar notificação de agendamento:', error);
+      } else {
+        // Recarregar notificações
+        await fetchNotifications(userId);
+      }
+    } catch (error) {
+      console.error('Erro ao criar notificação de agendamento:', error);
+    }
+  }, [fetchNotifications]);
+
+  // Função para criar notificação de compra
+  const createPurchaseNotification = useCallback(async (
+    userId: string,
+    businessName: string,
+    businessType: string,
+    amount: number,
+    date: Date
+  ) => {
+    try {
+      const { error } = await supabase.rpc('create_purchase_notification', {
+        p_user_id: userId,
+        p_business_name: businessName,
+        p_business_type: businessType,
+        p_amount: amount,
+        p_date: date.toISOString()
+      });
+
+      if (error) {
+        console.error('Erro ao criar notificação de compra:', error);
+      } else {
+        // Recarregar notificações
+        await fetchNotifications(userId);
+      }
+    } catch (error) {
+      console.error('Erro ao criar notificação de compra:', error);
+    }
+  }, [fetchNotifications]);
+
+  // Função para marcar notificação como lida
+  const markNotificationAsRead = useCallback(async (notificationId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('id', notificationId);
+
+      if (error) {
+        console.error('Erro ao marcar notificação como lida:', error);
+      } else {
+        setNotifications(prev => prev.map(n => n.id === notificationId ? { ...n, read: true } : n));
+      }
+    } catch (error) {
+      console.error('Erro ao marcar notificação como lida:', error);
+    }
+  }, []);
+
+  // Função para marcar todas as notificações como lidas
+  const markAllNotificationsAsRead = useCallback(async (userId: string) => {
+    try {
+      const { error } = await supabase
+        .from('notifications')
+        .update({ read: true })
+        .eq('user_id', userId)
+        .eq('read', false);
+
+      if (error) {
+        console.error('Erro ao marcar todas as notificações como lidas:', error);
+      } else {
+        setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+      }
+    } catch (error) {
+      console.error('Erro ao marcar todas as notificações como lidas:', error);
+    }
+  }, []);
+
   // Carregar businesses quando o app inicia
   useEffect(() => {
     let isMounted = true;
@@ -3954,6 +4246,11 @@ export default function App() {
           avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
           businessId: businessId
         });
+
+        // Se for CUSTOMER, buscar notificações
+        if (userRole === 'CUSTOMER' && session.user.id) {
+          fetchNotifications(session.user.id);
+        }
         
         // Se for BUSINESS_OWNER, buscar o business do banco
         if (userRole === 'BUSINESS_OWNER' && session.user.id) {
@@ -4270,6 +4567,21 @@ export default function App() {
       }
 
       addToast('Pagamento realizado com sucesso! Estoque atualizado.', 'success');
+      
+      // Criar notificação de compra
+      if (user?.id && businessId) {
+        const business = businesses.find(b => b.id === businessId);
+        if (business) {
+          await createPurchaseNotification(
+            user.id,
+            business.name,
+            business.type,
+            total,
+            new Date()
+          );
+        }
+      }
+      
       setCart([]);
       setIsCheckoutOpen(false);
     } catch (error: any) {
@@ -4352,17 +4664,18 @@ export default function App() {
 
     if (selectedBusiness) {
       return (
-        <BusinessDetailView 
-          business={selectedBusiness} 
-          collaborators={collaborators.filter((c: any) => c.businessId === selectedBusiness.id)} 
-          services={services.filter((s: any) => s.businessId === selectedBusiness.id)} 
-          products={products.filter((p: any) => p.businessId === selectedBusiness.id)} 
+        <BusinessDetailView
+          business={selectedBusiness}
+          collaborators={collaborators.filter((c: any) => c.businessId === selectedBusiness.id)}
+          services={services.filter((s: any) => s.businessId === selectedBusiness.id)}
+          products={products.filter((p: any) => p.businessId === selectedBusiness.id)}
           appointments={appointments}
           setAppointments={setAppointments}
           onBack={() => setSelectedBusiness(null)}
           addToast={addToast}
           addToCart={addToCart}
           user={user}
+          createAppointmentNotification={createAppointmentNotification}
         />
       );
     }
@@ -4580,6 +4893,8 @@ export default function App() {
         onOpenCart={() => setIsCartOpen(true)}
         onMenuToggle={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
         isMenuOpen={isMobileMenuOpen}
+        notificationCount={notifications.filter(n => !n.read).length}
+        onOpenNotifications={() => setIsNotificationsOpen(true)}
       />
       
       {/* Menu Mobile - Aparece abaixo da navbar em telas pequenas */}
@@ -4676,6 +4991,14 @@ export default function App() {
         )}
         <main className="flex-1 overflow-y-auto max-h-[calc(100vh-64px)] scroll-smooth">{renderContent()}</main>
       </div>
+
+      <NotificationsDrawer
+        isOpen={isNotificationsOpen}
+        onClose={() => setIsNotificationsOpen(false)}
+        notifications={notifications}
+        onMarkAsRead={markNotificationAsRead}
+        onMarkAllAsRead={() => user?.id && markAllNotificationsAsRead(user.id)}
+      />
 
       <CartDrawer 
         isOpen={isCartOpen} 
