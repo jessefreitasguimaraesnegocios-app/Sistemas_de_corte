@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { criarPagamentoPix, criarPagamentoCartao, verificarStatusPagamento } from '../services/paymentService';
 import { PixPaymentResponse, CreditCardPaymentResponse } from '../types';
 import { supabase } from '../lib/supabase';
+import { initMercadoPago, CardNumber, SecurityCode, ExpirationDate, createCardToken } from '@mercadopago/sdk-react';
 
 interface CheckoutModalProps {
   isOpen: boolean;
@@ -40,10 +41,84 @@ export default function CheckoutModal({
   const [cardName, setCardName] = useState('');
   const [cardExpiry, setCardExpiry] = useState('');
   const [cardCvv, setCardCvv] = useState('');
+  const [mpPublicKey, setMpPublicKey] = useState<string | null>(null);
+  const [mpInitialized, setMpInitialized] = useState(false);
+  
+  // Refs para os campos seguros do Mercado Pago
+  const cardNumberRef = useRef<any>(null);
+  const securityCodeRef = useRef<any>(null);
+  const expirationDateRef = useRef<any>(null);
 
   // Calcula taxa de 10%
   const applicationFee = total * 0.1;
   const totalWithFee = total;
+
+  // Buscar public key do Mercado Pago quando o modal abrir e estiver na aba de cartão
+  useEffect(() => {
+    if (isOpen && activeTab === 'card' && businessId && !mpPublicKey) {
+      const fetchPublicKey = async () => {
+        try {
+          // Buscar public key do business
+          const { data: businessData, error: businessError } = await supabase
+            .from('businesses')
+            .select('mp_public_key')
+            .eq('id', businessId)
+            .single();
+          
+          if (businessError) {
+            console.error('Erro ao buscar business:', businessError);
+            // Tentar via Edge Function como fallback
+            try {
+              const { data: keyData, error: keyError } = await supabase.functions.invoke('getMercadoPagoPublicKey', {
+                body: { business_id: businessId },
+              });
+              
+              if (!keyError && keyData?.public_key) {
+                setMpPublicKey(keyData.public_key);
+                initMercadoPago(keyData.public_key);
+                setMpInitialized(true);
+                return;
+              }
+            } catch (e) {
+              console.error('Erro ao buscar public key via Edge Function:', e);
+            }
+            
+            setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor e salve no campo mp_public_key.');
+            return;
+          }
+          
+          if (businessData?.mp_public_key) {
+            setMpPublicKey(businessData.mp_public_key);
+            initMercadoPago(businessData.mp_public_key);
+            setMpInitialized(true);
+          } else {
+            // Tentar via Edge Function como fallback
+            try {
+              const { data: keyData, error: keyError } = await supabase.functions.invoke('getMercadoPagoPublicKey', {
+                body: { business_id: businessId },
+              });
+              
+              if (!keyError && keyData?.public_key) {
+                setMpPublicKey(keyData.public_key);
+                initMercadoPago(keyData.public_key);
+                setMpInitialized(true);
+              } else {
+                setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor: https://www.mercadopago.com.br/developers/panel');
+              }
+            } catch (e) {
+              console.error('Erro ao buscar public key:', e);
+              setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor.');
+            }
+          }
+        } catch (error) {
+          console.error('Erro ao buscar public key:', error);
+          setError('Erro ao configurar pagamento com cartão. Tente novamente.');
+        }
+      };
+      
+      fetchPublicKey();
+    }
+  }, [isOpen, activeTab, businessId, mpPublicKey]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -59,6 +134,8 @@ export default function CheckoutModal({
       setCopied(false);
       setCheckingPayment(false);
       setPaymentStatus(null);
+      setMpPublicKey(null);
+      setMpInitialized(false);
     }
   }, [isOpen]);
 
@@ -362,60 +439,36 @@ export default function CheckoutModal({
         return;
       }
       
-      // Gerar token do cartão usando a API do Mercado Pago
-      // Primeiro, precisamos do access_token do business
-      const { data: businessData } = await supabase
-        .from('businesses')
-        .select('mp_access_token')
-        .eq('id', validBusinessId)
-        .single();
-      
-      if (!businessData?.mp_access_token) {
-        setError('Token de acesso do Mercado Pago não configurado para este estabelecimento.');
+      // Gerar token do cartão usando o SDK oficial do Mercado Pago
+      if (!mpInitialized || !mpPublicKey) {
+        setError('SDK do Mercado Pago não inicializado. Aguarde um momento e tente novamente.');
         setLoading(false);
         return;
       }
       
-      // Limpar número do cartão (remover espaços)
-      const cardNumberClean = cardNumber.replace(/\s/g, '');
-      const [expMonth, expYear] = cardExpiry.split('/');
+      // Validar nome do portador
+      if (!cardName || cardName.trim().length < 3) {
+        setError('Nome no cartão é obrigatório e deve ter pelo menos 3 caracteres.');
+        setLoading(false);
+        return;
+      }
       
-      // Gerar token do cartão via API do Mercado Pago
+      // Gerar token usando o SDK do Mercado Pago
       let cardToken: string;
       try {
-        const tokenResponse = await fetch('https://api.mercadopago.com/v1/card_tokens', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${businessData.mp_access_token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            card_number: cardNumberClean,
-            cardholder: {
-              name: cardName,
-            },
-            expiration_month: parseInt(expMonth),
-            expiration_year: parseInt('20' + expYear),
-            security_code: cardCvv,
-          }),
+        const tokenData = await createCardToken({
+          cardholderName: cardName.trim(),
+          identificationType: 'CPF',
+          identificationNumber: '00000000000', // Em produção, coletar do usuário
         });
         
-        if (!tokenResponse.ok) {
-          const errorData = await tokenResponse.json();
-          console.error('Erro ao gerar token do cartão:', errorData);
-          setError(`Erro ao processar dados do cartão: ${errorData.message || 'Token inválido'}`);
-          setLoading(false);
-          return;
-        }
-        
-        const tokenData = await tokenResponse.json();
-        cardToken = tokenData.id;
-        
-        if (!cardToken) {
+        if (!tokenData || !tokenData.id) {
           setError('Não foi possível gerar o token do cartão. Verifique os dados e tente novamente.');
           setLoading(false);
           return;
         }
+        
+        cardToken = tokenData.id;
       } catch (tokenError: any) {
         console.error('Erro ao gerar token do cartão:', tokenError);
         setError(`Erro ao processar dados do cartão: ${tokenError.message || 'Erro desconhecido'}`);
@@ -633,67 +686,88 @@ export default function CheckoutModal({
               <div className="space-y-6">
                 {!cardData ? (
                   <>
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          Número do Cartão
-                        </label>
-                        <input
-                          type="text"
-                          value={cardNumber}
-                          onChange={(e) => setCardNumber(formatCardNumber(e.target.value))}
-                          placeholder="0000 0000 0000 0000"
-                          maxLength={19}
-                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
-                        />
+                    {!mpInitialized ? (
+                      <div className="text-center py-8">
+                        <Loader2 size={32} className="mx-auto text-indigo-600 animate-spin mb-4" />
+                        <p className="text-slate-600 font-semibold">
+                          Configurando pagamento seguro...
+                        </p>
                       </div>
-                      <div>
-                        <label className="block text-sm font-semibold text-slate-700 mb-2">
-                          Nome no Cartão
-                        </label>
-                        <input
-                          type="text"
-                          value={cardName}
-                          onChange={(e) => setCardName(e.target.value.toUpperCase())}
-                          placeholder="NOME COMPLETO"
-                          className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-900"
-                        />
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
+                    ) : (
+                      <div className="space-y-4">
                         <div>
                           <label className="block text-sm font-semibold text-slate-700 mb-2">
-                            Validade
+                            Número do Cartão
                           </label>
-                          <input
-                            type="text"
-                            value={cardExpiry}
-                            onChange={(e) => setCardExpiry(formatExpiry(e.target.value))}
-                            placeholder="MM/AA"
-                            maxLength={5}
-                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
-                          />
+                          <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                            <CardNumber
+                              ref={cardNumberRef}
+                              placeholder="0000 0000 0000 0000"
+                              style={{ 
+                                fontSize: '16px',
+                                fontFamily: 'monospace',
+                                width: '100%',
+                                border: 'none',
+                                outline: 'none',
+                                color: '#0f172a'
+                              }}
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="block text-sm font-semibold text-slate-700 mb-2">
-                            CVV
+                            Nome no Cartão
                           </label>
                           <input
                             type="text"
-                            value={cardCvv}
-                            onChange={(e) => setCardCvv(e.target.value.replace(/\D/g, '').substring(0, 4))}
-                            placeholder="123"
-                            maxLength={4}
-                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none font-mono text-slate-900"
+                            value={cardName}
+                            onChange={(e) => setCardName(e.target.value.toUpperCase())}
+                            placeholder="NOME COMPLETO"
+                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-900"
                           />
                         </div>
+                        <div className="grid grid-cols-2 gap-4">
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                              Validade
+                            </label>
+                            <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                              <ExpirationDate
+                                ref={expirationDateRef}
+                                placeholder="MM/AA"
+                                style={{ 
+                                  fontSize: '16px',
+                                  fontFamily: 'monospace',
+                                  width: '100%',
+                                  border: 'none',
+                                  outline: 'none',
+                                  color: '#0f172a'
+                                }}
+                              />
+                            </div>
+                          </div>
+                          <div>
+                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                              CVV
+                            </label>
+                            <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                              <SecurityCode
+                                ref={securityCodeRef}
+                                placeholder="123"
+                                style={{ 
+                                  fontSize: '16px',
+                                  fontFamily: 'monospace',
+                                  width: '100%',
+                                  border: 'none',
+                                  outline: 'none',
+                                  color: '#0f172a'
+                                }}
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
-                    </div>
-                    <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl">
-                      <p className="text-xs text-amber-700">
-                        ⚠️ <strong>Nota:</strong> Esta é uma implementação de demonstração. Em produção, 
-                        use o SDK oficial do Mercado Pago para tokenização segura do cartão.
-                      </p>
-                    </div>
+                    )}
                     <button
                       onClick={handleCardPayment}
                       disabled={loading}
