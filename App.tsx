@@ -22,34 +22,12 @@ interface CartItem {
   quantity: number;
 }
 
-// --- INITIAL MOCK DATA ---
-const INITIAL_BUSINESSES: Business[] = [
-  { 
-    id: '1', name: 'Barba de Respeito', type: 'BARBERSHOP', description: 'Atendimento clássico com técnicas modernas de visagismo.', address: 'Av. Paulista, 100', image: 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=800', rating: 4.8, ownerId: '1', monthlyFee: 150, revenueSplit: 10, status: 'ACTIVE'
-  },
-  { 
-    id: '2', name: 'Studio Glamour', type: 'SALON', description: 'A excelência em colorimetria e tratamentos capilares avançados.', address: 'Rua Augusta, 500', image: 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=800', rating: 4.9, ownerId: '2', monthlyFee: 200, revenueSplit: 12, status: 'ACTIVE'
-  }
-];
+// --- DEFAULT IMAGES ---
+// Imagens padrão para businesses quando não há imagem definida
+const DEFAULT_BARBERSHOP_IMAGE = 'https://images.unsplash.com/photo-1503951914875-452162b0f3f1?auto=format&fit=crop&q=80&w=800';
+const DEFAULT_SALON_IMAGE = 'https://images.unsplash.com/photo-1560066984-138dadb4c035?auto=format&fit=crop&q=80&w=800';
 
-const INITIAL_COLLABORATORS: Collaborator[] = [
-  { id: 'c1', businessId: '1', name: 'João Mestre', role: 'Barbeiro Sênior', avatar: 'https://i.pravatar.cc/150?u=c1', rating: 4.9 },
-  { id: 'c2', businessId: '1', name: 'Lucas Corte', role: 'Especialista em Fade', avatar: 'https://i.pravatar.cc/150?u=c2', rating: 4.7 },
-  { id: 'c3', businessId: '2', name: 'Maria Estilo', role: 'Colorista', avatar: 'https://i.pravatar.cc/150?u=c3', rating: 5.0 },
-];
-
-const INITIAL_SERVICES: Service[] = [
-  { id: 's1', businessId: '1', name: 'Corte Social', price: 45, duration: 30 },
-  { id: 's2', businessId: '1', name: 'Barba Completa', price: 35, duration: 25 },
-  { id: 's3', businessId: '2', name: 'Escova Progressiva', price: 180, duration: 120 },
-];
-
-const INITIAL_PRODUCTS: Product[] = [
-  { id: 'p1', businessId: '1', name: 'Óleo para Barba Wood', price: 55, stock: 20, image: 'https://images.unsplash.com/photo-1626285861696-9f0bf5a49c6d?auto=format&fit=crop&q=80&w=400', category: 'Barba' },
-  { id: 'p2', businessId: '2', name: 'Sérum Reparador', price: 85, stock: 15, image: 'https://images.unsplash.com/photo-1608248597279-f99d160bfcbc?auto=format&fit=crop&q=80&w=400', category: 'Tratamento' },
-  { id: 'p3', businessId: '1', name: 'Pomada Matte Extra', price: 42, stock: 10, image: 'https://images.unsplash.com/photo-1599351431247-f10b21ce5602?auto=format&fit=crop&q=80&w=400', category: 'Cabelo' },
-  { id: 'p4', businessId: '2', name: 'Shampoo Detox Lux', price: 65, stock: 25, image: 'https://images.unsplash.com/photo-1535585209827-a15fcdbc4c2d?auto=format&fit=crop&q=80&w=400', category: 'Shampoo' },
-];
+// Dados mockados removidos - o sistema agora usa exclusivamente o banco de dados Supabase
 
 // --- TOAST COMPONENT ---
 const Toast = ({ message, type, onClose }: { message: string, type: 'success' | 'error', onClose: () => void }) => {
@@ -2181,7 +2159,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
           type: newBiz.type,
           description: desc,
           address: 'Novo Endereço, 00',
-          image: newBiz.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image,
+          image: newBiz.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE,
           owner_id: ownerId,
           revenue_split: newBiz.revenueSplit || 10,
           monthly_fee: newBiz.monthlyFee || 150,
@@ -2220,7 +2198,7 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
         type: businessData.type,
         description: businessData.description || desc,
         address: businessData.address || 'Novo Endereço, 00',
-        image: businessData.image || (newBiz.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+        image: businessData.image || (newBiz.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
         rating: 5.0,
         ownerId: businessData.owner_id,
         revenueSplit: businessData.revenue_split || newBiz.revenueSplit || 10,
@@ -2350,13 +2328,30 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
     setConfirmPauseModal({business: null, action: 'pause'});
   };
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!confirmDeleteModal) return;
 
     const businessName = confirmDeleteModal.name;
-    setBusinesses(businesses.filter((x: any) => x.id !== confirmDeleteModal.id));
-    addToast(`${businessName} foi removido da plataforma`, 'success');
-    setConfirmDeleteModal(null);
+    const businessId = confirmDeleteModal.id;
+
+    try {
+      // Deletar do banco de dados
+      const { error } = await supabase
+        .from('businesses')
+        .delete()
+        .eq('id', businessId);
+
+      if (error) throw error;
+
+      // Remover do estado local
+      setBusinesses(businesses.filter((x: any) => x.id !== businessId));
+      addToast(`${businessName} foi removido da plataforma`, 'success');
+    } catch (error: any) {
+      console.error('Erro ao deletar business:', error);
+      addToast('Erro ao remover estabelecimento. Tente novamente.', 'error');
+    } finally {
+      setConfirmDeleteModal(null);
+    }
   };
 
   const handleConfigureBusiness = (business: Business) => {
@@ -3000,16 +2995,18 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
         return (
           <div className="space-y-8 animate-in fade-in duration-500">
              <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                <div className="lg:col-span-2 bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-sm h-[450px]">
+                <div className="lg:col-span-2 bg-white p-10 rounded-[2.5rem] border border-slate-200 shadow-sm h-[450px] flex flex-col">
                    <h3 className="text-xl font-black mb-8 flex items-center gap-2"><TrendingUp className="text-indigo-600" /> Volume Global da Rede</h3>
-                   <ResponsiveContainer width="100%" height="80%">
-                      <BarChart data={[{n:'Jan',v:12000},{n:'Fev',v:15000},{n:'Mar',v:13000},{n:'Abr',v:25000},{n:'Mai',v:38000}]}>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                        <XAxis dataKey="n" />
-                        <YAxis />
-                        <Bar dataKey="v" fill="#6366f1" radius={[8,8,0,0]} barSize={50} />
-                      </BarChart>
-                   </ResponsiveContainer>
+                   <div className="flex-1 min-h-0">
+                     <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={[{n:'Jan',v:12000},{n:'Fev',v:15000},{n:'Mar',v:13000},{n:'Abr',v:25000},{n:'Mai',v:38000}]}>
+                          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                          <XAxis dataKey="n" />
+                          <YAxis />
+                          <Bar dataKey="v" fill="#6366f1" radius={[8,8,0,0]} barSize={50} />
+                        </BarChart>
+                     </ResponsiveContainer>
+                   </div>
                 </div>
                 <div className="bg-slate-900 p-10 rounded-[2.5rem] text-white shadow-2xl flex flex-col justify-between">
                    <div>
@@ -3766,9 +3763,10 @@ export default function App() {
           details: error.details,
           hint: error.hint
         });
-        // Se der erro, usar dados iniciais como fallback
-        setBusinesses(INITIAL_BUSINESSES);
+        // Em caso de erro, usar array vazio (não usar dados mockados)
+        setBusinesses([]);
         setBusinessLoadTimeout(true);
+        setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
         return;
       }
 
@@ -3780,7 +3778,7 @@ export default function App() {
           type: b.type as 'BARBERSHOP' | 'SALON',
           description: b.description || '',
           address: b.address || '',
-          image: b.image || (b.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+          image: b.image || (b.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
           rating: Number(b.rating) || 0,
           ownerId: b.owner_id,
           monthlyFee: Number(b.monthly_fee) || 0,
@@ -3795,8 +3793,8 @@ export default function App() {
         setBusinesses(businessesData as any);
         setBusinessLoadTimeout(false);
       } else {
-        // Se não houver dados, usar dados iniciais como fallback
-        setBusinesses(INITIAL_BUSINESSES);
+        // Se não houver dados, usar array vazio (não usar dados mockados)
+        setBusinesses([]);
         setBusinessLoadTimeout(false);
       }
     } catch (error: any) {
@@ -3808,8 +3806,10 @@ export default function App() {
         hint: error?.hint,
         stack: error?.stack
       });
-      setBusinesses(INITIAL_BUSINESSES);
+      // Em caso de erro, usar array vazio (não usar dados mockados)
+      setBusinesses([]);
       setBusinessLoadTimeout(true);
+      setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
     } finally {
       setLoadingBusinesses(false);
     }
@@ -3925,7 +3925,7 @@ export default function App() {
                 type: businessData.type as 'BARBERSHOP' | 'SALON',
                 description: businessData.description || '',
                 address: businessData.address || '',
-                image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
                 rating: Number(businessData.rating) || 0,
                 ownerId: businessData.owner_id,
                 monthlyFee: Number(businessData.monthly_fee) || 0,
@@ -4051,7 +4051,7 @@ export default function App() {
                   type: businessData.type as 'BARBERSHOP' | 'SALON',
                   description: businessData.description || '',
                   address: businessData.address || '',
-                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
                   rating: Number(businessData.rating) || 0,
                   ownerId: businessData.owner_id,
                   monthlyFee: Number(businessData.monthly_fee) || 0,
@@ -4099,7 +4099,7 @@ export default function App() {
                   type: businessData.type as 'BARBERSHOP' | 'SALON',
                   description: businessData.description || '',
                   address: businessData.address || '',
-                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                  image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
                   rating: Number(businessData.rating) || 0,
                   ownerId: businessData.owner_id,
                   monthlyFee: Number(businessData.monthly_fee) || 0,
@@ -4306,15 +4306,16 @@ export default function App() {
     setCart([]);
   };
 
-  const mockLogin = (role: UserRole) => {
-    setUser({
-      id: Math.random().toString(),
-      name: role === 'SUPER_ADMIN' ? 'Henrique Admin' : role === 'BUSINESS_OWNER' ? 'Marcos Dono' : 'Diego Cliente',
-      email: 'user@test.com',
-      role: role,
-      businessId: role === 'BUSINESS_OWNER' ? '1' : undefined
-    });
-  };
+  // Função mockLogin removida - usar autenticação real do Supabase
+  // const mockLogin = (role: UserRole) => {
+  //   setUser({
+  //     id: Math.random().toString(),
+  //     name: role === 'SUPER_ADMIN' ? 'Henrique Admin' : role === 'BUSINESS_OWNER' ? 'Marcos Dono' : 'Diego Cliente',
+  //     email: 'user@test.com',
+  //     role: role,
+  //     businessId: role === 'BUSINESS_OWNER' ? '1' : undefined
+  //   });
+  // };
 
   const totalCartItems = cart.reduce((acc, item) => acc + item.quantity, 0);
 
@@ -4326,7 +4327,8 @@ export default function App() {
              <div className="bg-indigo-600 w-28 h-28 rounded-[2.5rem] flex items-center justify-center mx-auto text-white shadow-2xl rotate-12"><Zap size={56} fill="currentColor" /></div>
              <div><h2 className="text-4xl font-black tracking-tighter text-slate-900">Beleza<span className="text-indigo-600">Hub</span></h2><p className="text-slate-500 mt-4 font-medium text-lg leading-relaxed">Infraestrutura SaaS de Estética Integrada ao Supabase.</p></div>
              <div className="space-y-4">
-                <button onClick={() => mockLogin('CUSTOMER')} className="w-full flex items-center justify-center gap-4 bg-slate-900 text-white p-6 rounded-[1.8rem] font-black text-lg hover:bg-indigo-600 transition-all shadow-2xl active:scale-95">Sou Cliente</button>
+                {/* Botão de mock login removido - usar autenticação real */}
+                {/* <button onClick={() => mockLogin('CUSTOMER')} className="w-full flex items-center justify-center gap-4 bg-slate-900 text-white p-6 rounded-[1.8rem] font-black text-lg hover:bg-indigo-600 transition-all shadow-2xl active:scale-95">Sou Cliente</button> */}
                 <div className="grid grid-cols-2 gap-3">
                   <button 
                     onClick={() => setShowBusinessLoginModal(true)} 
@@ -4456,7 +4458,7 @@ export default function App() {
                             type: businessData.type as 'BARBERSHOP' | 'SALON',
                             description: businessData.description || '',
                             address: businessData.address || '',
-                            image: businessData.image || (businessData.type === 'BARBERSHOP' ? INITIAL_BUSINESSES[0].image : INITIAL_BUSINESSES[1].image),
+                            image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
                             rating: Number(businessData.rating) || 0,
                             ownerId: businessData.owner_id,
                             monthlyFee: Number(businessData.monthly_fee) || 0,

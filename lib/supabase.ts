@@ -2,8 +2,22 @@
 import { createClient } from '@supabase/supabase-js';
 
 // Variáveis de ambiente do Vite (precisam ter prefixo VITE_)
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://your-project-url.supabase.co';
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'your-anon-key';
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+
+// Validar que as variáveis de ambiente estão configuradas
+if (!supabaseUrl || !supabaseAnonKey || supabaseUrl === 'https://your-project-url.supabase.co' || supabaseAnonKey === 'your-anon-key') {
+  console.error('❌ ERRO: Variáveis de ambiente do Supabase não configuradas!');
+  console.error('📝 Crie um arquivo .env.local na raiz do projeto com:');
+  console.error('   VITE_SUPABASE_URL=https://seu-projeto.supabase.co');
+  console.error('   VITE_SUPABASE_ANON_KEY=sua-chave-anon-key');
+  console.error('💡 Veja o arquivo SETUP_COMPLETO.md para mais detalhes.');
+  
+  // Em produção, ainda tentar usar (pode estar configurado na Vercel)
+  if (import.meta.env.MODE === 'development') {
+    throw new Error('Variáveis de ambiente do Supabase não configuradas. Verifique o arquivo .env.local');
+  }
+}
 
 // Criar instância única do cliente Supabase para evitar múltiplas instâncias
 // Usar uma chave única no localStorage para evitar conflitos
