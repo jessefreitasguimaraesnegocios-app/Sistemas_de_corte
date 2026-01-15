@@ -9,6 +9,71 @@ const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ||
                      Deno.env.get("SUPABASE_PROJECT_URL") ||
                      "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
+// Secret key para validar assinatura do webhook (obtido no painel do Mercado Pago)
+const MP_WEBHOOK_SECRET = Deno.env.get("MP_WEBHOOK_SECRET") || "";
+
+// Função para verificar assinatura do webhook do Mercado Pago
+async function verifyWebhookSignature(
+  xSignature: string | null,
+  xRequestId: string | null,
+  dataId: string,
+  secret: string
+): Promise<boolean> {
+  if (!xSignature || !xRequestId || !secret) {
+    console.warn("⚠️ Dados de assinatura incompletos para validação");
+    return false;
+  }
+
+  try {
+    // Parse x-signature: ts=<timestamp>,v1=<signature>
+    const parts = xSignature.split(",");
+    let ts = "";
+    let v1 = "";
+    
+    parts.forEach(part => {
+      const [key, value] = part.split("=");
+      if (key.trim() === "ts") ts = value.trim();
+      else if (key.trim() === "v1") v1 = value.trim();
+    });
+
+    if (!ts || !v1) {
+      console.error("❌ Formato de assinatura inválido");
+      return false;
+    }
+
+    // Construir manifest: id:<data.id>;request-id:<x-request-id>;ts:<ts>;
+    // data.id deve estar em lowercase se for alfanumérico
+    const dataIdLower = dataId.toLowerCase();
+    const manifest = `id:${dataIdLower};request-id:${xRequestId};ts:${ts};`;
+
+    // Calcular HMAC-SHA256
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(manifest);
+    
+    // Usar Web Crypto API para HMAC
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+
+    const signature = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+    const hashArray = Array.from(new Uint8Array(signature));
+    const hashHex = hashArray.map(b => b.toString(16).padStart(2, "0")).join("");
+    
+    const isValid = hashHex === v1;
+    if (!isValid) {
+      console.error("❌ Assinatura inválida:", { computed: hashHex, received: v1 });
+    }
+    return isValid;
+  } catch (error) {
+    console.error("❌ Erro ao verificar assinatura:", error);
+    return false;
+  }
+}
 
 serve(async (req: Request) => {
   const corsHeaders = {
@@ -36,13 +101,44 @@ serve(async (req: Request) => {
       webhookData = await req.json();
     }
 
-    console.log("📥 Webhook recebido do Mercado Pago:", JSON.stringify(webhookData, null, 2));
+    // Extrair headers de autenticação
+    const xSignature = req.headers.get("x-signature");
+    const xRequestId = req.headers.get("x-request-id");
+    
+    console.log("📥 Webhook recebido do Mercado Pago");
+    console.log("- x-signature:", xSignature ? "Presente" : "Ausente");
+    console.log("- x-request-id:", xRequestId || "Ausente");
+    console.log("- Body:", JSON.stringify(webhookData, null, 2));
 
     // Estrutura do webhook do Mercado Pago:
     // { type: "payment", data: { id: "123456789" } }
     // ou para Orders API: { type: "order", data: { id: "123456789" } }
     const webhookType = webhookData.type;
     const resourceId = webhookData.data?.id;
+
+    // Validar assinatura se secret estiver configurado
+    if (MP_WEBHOOK_SECRET && resourceId) {
+      const isValid = await verifyWebhookSignature(
+        xSignature,
+        xRequestId,
+        resourceId.toString(),
+        MP_WEBHOOK_SECRET
+      );
+      
+      if (!isValid) {
+        console.error("❌ Assinatura do webhook inválida - possível tentativa de fraude");
+        return new Response(
+          JSON.stringify({ error: "Assinatura inválida" }),
+          {
+            status: 401,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          }
+        );
+      }
+      console.log("✅ Assinatura do webhook validada com sucesso");
+    } else if (!MP_WEBHOOK_SECRET) {
+      console.warn("⚠️ MP_WEBHOOK_SECRET não configurado - webhook aceito sem validação");
+    }
 
     if (!resourceId) {
       console.error("❌ Webhook sem ID de recurso:", webhookData);
