@@ -157,20 +157,72 @@ serve(async (req: Request) => {
     // Se for um webhook de payment, buscar o payment diretamente
     if (webhookType === "payment") {
       // Buscar transação pelo payment_id
-      const { data: transaction, error: transError } = await supabase
+      let { data: transaction, error: transError } = await supabase
         .from("transactions")
-        .select("business_id, payment_id")
+        .select("business_id, payment_id, external_reference")
         .eq("payment_id", resourceId.toString())
         .single();
 
+      // Se não encontrar pelo payment_id, tentar buscar pelo external_reference
+      // (pode ser que o payment_id salvo seja o order_id)
       if (transError || !transaction) {
         console.log("⚠️ Transação não encontrada para payment_id:", resourceId);
-        // Buscar status no Mercado Pago (precisa do access token do business)
-        // Por enquanto, apenas logar
+        console.log("🔍 Tentando buscar pelo external_reference...");
+        
+        // Buscar payment no Mercado Pago para obter o external_reference (order_id)
+        // Mas precisamos do access token... Vamos tentar buscar em todos os businesses
+        const { data: allBusinesses } = await supabase
+          .from("businesses")
+          .select("id, mp_access_token")
+          .not("mp_access_token", "is", null);
+        
+        if (allBusinesses && allBusinesses.length > 0) {
+          // Tentar buscar o payment em cada business até encontrar
+          for (const biz of allBusinesses) {
+            try {
+              const mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
+                method: "GET",
+                headers: {
+                  "Authorization": `Bearer ${biz.mp_access_token}`,
+                  "Content-Type": "application/json",
+                },
+              });
+
+              if (mp_response.ok) {
+                const paymentData = await mp_response.json();
+                const externalRef = paymentData.external_reference || paymentData.order?.id;
+                
+                if (externalRef) {
+                  // Buscar transação pelo external_reference
+                  const { data: transByRef, error: refError } = await supabase
+                    .from("transactions")
+                    .select("business_id, payment_id, external_reference")
+                    .eq("external_reference", externalRef)
+                    .single();
+                  
+                  if (!refError && transByRef) {
+                    transaction = transByRef;
+                    transError = null;
+                    console.log("✅ Transação encontrada pelo external_reference:", externalRef);
+                    break;
+                  }
+                }
+              }
+            } catch (e) {
+              // Continuar tentando com próximo business
+              continue;
+            }
+          }
+        }
+      }
+
+      if (transError || !transaction) {
+        console.log("⚠️ Transação não encontrada para payment_id:", resourceId);
         return new Response(
           JSON.stringify({ 
             message: "Webhook recebido, mas transação não encontrada no banco",
-            payment_id: resourceId 
+            payment_id: resourceId,
+            note: "A transação pode não ter sido criada ainda ou o payment_id não corresponde"
           }),
           {
             status: 200,
@@ -224,21 +276,81 @@ serve(async (req: Request) => {
       console.log(`✅ Atualizando transação ${resourceId} para status: ${status}`);
 
       // Chamar função SQL para atualizar status
-      const { error: updateError } = await supabase.rpc("process_mercado_pago_webhook", {
-        payment_id_param: resourceId.toString(),
-        status_param: status,
-        status_detail_param: statusDetail || null,
-      });
+      let updateError = null;
+      try {
+        const { error: rpcError } = await supabase.rpc("process_mercado_pago_webhook", {
+          payment_id_param: resourceId.toString(),
+          status_param: status,
+          status_detail_param: statusDetail || null,
+        });
+        updateError = rpcError;
+      } catch (rpcException) {
+        console.error("❌ Exceção ao chamar RPC:", rpcException);
+        updateError = rpcException;
+      }
 
+      // Se a função RPC falhar, tentar atualizar diretamente
       if (updateError) {
-        console.error("❌ Erro ao atualizar transação:", updateError);
-        return new Response(
-          JSON.stringify({ error: "Erro ao atualizar transação", details: updateError }),
-          {
-            status: 500,
-            headers: { ...corsHeaders, "Content-Type": "application/json" }
+        console.warn("⚠️ Função RPC falhou, tentando atualizar diretamente:", updateError);
+        
+        const statusToUpdate = status === "approved" ? "PAID" :
+                              status === "pending" ? "PENDING" :
+                              status === "rejected" || status === "cancelled" ? "PENDING" :
+                              status === "refunded" ? "REFUNDED" : "PENDING";
+
+        const { error: directUpdateError } = await supabase
+          .from("transactions")
+          .update({
+            status: statusToUpdate,
+            updated_at: new Date().toISOString()
+          })
+          .eq("payment_id", resourceId.toString());
+
+        if (directUpdateError) {
+          console.error("❌ Erro ao atualizar transação diretamente:", directUpdateError);
+          // Se ainda não encontrar pelo payment_id, tentar pelo external_reference
+          // (pode ser que o payment_id salvo seja diferente)
+          if (transaction.external_reference) {
+            const { error: refUpdateError } = await supabase
+              .from("transactions")
+              .update({
+                status: statusToUpdate,
+                payment_id: resourceId.toString(), // Atualizar o payment_id também
+                updated_at: new Date().toISOString()
+              })
+              .eq("external_reference", transaction.external_reference);
+
+            if (refUpdateError) {
+              console.error("❌ Erro ao atualizar transação pelo external_reference:", refUpdateError);
+              return new Response(
+                JSON.stringify({ 
+                  error: "Erro ao atualizar transação", 
+                  details: refUpdateError,
+                  payment_id: resourceId,
+                  note: "Tentativas de atualização falharam"
+                }),
+                {
+                  status: 500,
+                  headers: { ...corsHeaders, "Content-Type": "application/json" }
+                }
+              );
+            } else {
+              console.log("✅ Transação atualizada pelo external_reference");
+            }
+          } else {
+            return new Response(
+              JSON.stringify({ error: "Erro ao atualizar transação", details: directUpdateError }),
+              {
+                status: 500,
+                headers: { ...corsHeaders, "Content-Type": "application/json" }
+              }
+            );
           }
-        );
+        } else {
+          console.log("✅ Transação atualizada diretamente");
+        }
+      } else {
+        console.log("✅ Transação atualizada via função RPC");
       }
 
       return new Response(
@@ -256,22 +368,128 @@ serve(async (req: Request) => {
 
     // Se for um webhook de order (Orders API)
     if (webhookType === "order") {
-      // Para Orders API, precisamos buscar a order e depois os payments dentro dela
-      // Por enquanto, vamos buscar a transação pelo order_id ou payment_id
-      // O order_id pode estar no external_reference ou precisamos buscar de outra forma
-      
       console.log("📦 Webhook de Order recebido:", resourceId);
       
-      // Buscar transação pelo external_reference (que pode conter o order_id)
-      // Ou buscar payments dentro da order
-      // Por enquanto, vamos retornar sucesso e logar
+      // Buscar transação pelo external_reference (que contém o order_id)
+      const { data: transaction, error: transError } = await supabase
+        .from("transactions")
+        .select("business_id, payment_id, external_reference")
+        .eq("external_reference", resourceId.toString())
+        .single();
+
+      if (transError || !transaction) {
+        console.log("⚠️ Transação não encontrada para order_id:", resourceId);
+        return new Response(
+          JSON.stringify({ 
+            message: "Webhook de Order recebido, mas transação não encontrada",
+            order_id: resourceId 
+          }),
+          {
+            status: 200,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          }
+        );
+      }
+
+      // Buscar business para obter access token
+      const { data: business, error: businessError } = await supabase
+        .from("businesses")
+        .select("mp_access_token")
+        .eq("id", transaction.business_id)
+        .single();
+
+      if (businessError || !business?.mp_access_token) {
+        console.error("❌ Business não encontrado ou sem token:", businessError);
+        return new Response(
+          JSON.stringify({ error: "Business não encontrado" }),
+          {
+            status: 404,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          }
+        );
+      }
+
+      // Buscar order no Mercado Pago para obter os payments dentro dela
+      const order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
+        method: "GET",
+        headers: {
+          "Authorization": `Bearer ${business.mp_access_token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (!order_response.ok) {
+        console.error("❌ Erro ao buscar order no Mercado Pago:", await order_response.text());
+        return new Response(
+          JSON.stringify({ error: "Erro ao buscar order no Mercado Pago" }),
+          {
+            status: 500,
+            headers: { ...corsHeaders, "Content-Type": "application/json" }
+          }
+        );
+      }
+
+      const orderData = await order_response.json();
+      const payments = orderData.payments || [];
       
+      // Atualizar status baseado no status da order
+      // Se algum payment está approved, a order está aprovada
+      const hasApprovedPayment = payments.some((p: any) => p.status === "approved");
+      const hasRejectedPayment = payments.every((p: any) => p.status === "rejected" || p.status === "cancelled");
+      
+      let status = "pending";
+      if (hasApprovedPayment) {
+        status = "approved";
+      } else if (hasRejectedPayment && payments.length > 0) {
+        status = "rejected";
+      }
+
+      console.log(`✅ Atualizando transação da order ${resourceId} para status: ${status}`);
+
+      // Atualizar payment_id se ainda não estiver salvo (usar o primeiro payment aprovado)
+      const approvedPayment = payments.find((p: any) => p.status === "approved");
+      const paymentIdToUpdate = approvedPayment?.id?.toString() || payments[0]?.id?.toString();
+
+      // Chamar função SQL para atualizar status
+      if (paymentIdToUpdate) {
+        const { error: updateError } = await supabase.rpc("process_mercado_pago_webhook", {
+          payment_id_param: paymentIdToUpdate,
+          status_param: status,
+          status_detail_param: null,
+        });
+
+        if (updateError) {
+          console.error("❌ Erro ao atualizar transação:", updateError);
+          // Tentar atualizar diretamente pelo external_reference
+          const { error: directUpdateError } = await supabase
+            .from("transactions")
+            .update({
+              status: status === "approved" ? "PAID" : "PENDING",
+              payment_id: paymentIdToUpdate,
+              updated_at: new Date().toISOString()
+            })
+            .eq("external_reference", resourceId.toString());
+
+          if (directUpdateError) {
+            console.error("❌ Erro ao atualizar transação diretamente:", directUpdateError);
+            return new Response(
+              JSON.stringify({ error: "Erro ao atualizar transação", details: directUpdateError }),
+              {
+                status: 500,
+                headers: { ...corsHeaders, "Content-Type": "application/json" }
+              }
+            );
+          }
+        }
+      }
+
       return new Response(
         JSON.stringify({ 
           success: true,
-          message: "Webhook de Order recebido",
+          message: "Webhook de Order processado com sucesso",
           order_id: resourceId,
-          note: "Processamento de Order webhook - implementação futura"
+          status: status,
+          payments_count: payments.length
         }),
         {
           headers: { ...corsHeaders, "Content-Type": "application/json" }

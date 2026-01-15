@@ -368,6 +368,18 @@ serve(async (req: Request) => {
                             payment.status === "action_required" ? "PENDING" :
                             payment.status === "rejected" ? "PENDING" : "PENDING";
 
+    // IMPORTANTE: Salvar o payment.id (não o order.id) para que o webhook possa encontrar a transação
+    // O external_reference contém a referência externa (que pode ser usada para buscar pelo order_id)
+    const paymentIdToSave = payment.id?.toString() || "";
+    const orderId = mp_result.id?.toString() || "";
+
+    console.log("💾 Salvando transação:", {
+      payment_id: paymentIdToSave,
+      order_id: orderId,
+      external_reference: referencia_externa,
+      status: transactionStatus
+    });
+
     const { error: transactionError } = await supabase
       .from("transactions")
       .insert({
@@ -378,10 +390,10 @@ serve(async (req: Request) => {
         date: new Date().toISOString(),
         status: transactionStatus,
         gateway: "MERCADO_PAGO",
-        payment_id: payment.id?.toString() || mp_result.id?.toString() || "",
+        payment_id: paymentIdToSave, // Sempre salvar o payment.id (não o order.id)
         payment_method: metodo_pagamento === "pix" ? "pix" : "credit_card",
         customer_email: email_cliente,
-        external_reference: referencia_externa,
+        external_reference: referencia_externa, // Contém a referência externa (pode ser usado para buscar order)
       });
 
     if (transactionError) {
