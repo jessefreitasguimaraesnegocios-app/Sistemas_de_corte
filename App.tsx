@@ -1551,7 +1551,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
 // --- CUSTOMER VIEW ---
 
-const BusinessDetailView = ({ business, collaborators, services, products, appointments, setAppointments, onBack, addToast, addToCart }: any) => {
+const BusinessDetailView = ({ business, collaborators, services, products, appointments, setAppointments, onBack, addToast, addToCart, user }: any) => {
   const [activeSubTab, setActiveSubTab] = useState<'SERVICES' | 'STORE'>('SERVICES');
   const [selectedPro, setSelectedPro] = useState<Collaborator | null>(null);
   const [bookingService, setBookingService] = useState<Service | null>(null);
@@ -2035,15 +2035,15 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
       const usersWithBusinesses = await Promise.all(
         (usersData || []).map(async (user: any) => {
           if (user.business_id) {
-            const { data: businessData } = await supabase
+            const { data: businessData, error: businessError } = await supabase
               .from('businesses')
               .select('id, name')
               .eq('id', user.business_id)
-              .single();
+              .maybeSingle();
             
             return {
               ...user,
-              business: businessData
+              business: businessError ? null : businessData
             };
           }
           return user;
@@ -3856,13 +3856,13 @@ export default function App() {
           
           // Se não tem business_id, buscar do banco de dados
           if (!businessId) {
-            const { data: businessData } = await supabase
+            const { data: businessData, error: businessError } = await supabase
               .from('businesses')
               .select('id')
               .eq('owner_id', session.user.id)
-              .single();
+              .maybeSingle();
             
-            if (businessData) {
+            if (!businessError && businessData) {
               businessId = businessData.id;
             }
           }
@@ -3900,17 +3900,17 @@ export default function App() {
         
         // Se for BUSINESS_OWNER, buscar o business do banco
         if (userRole === 'BUSINESS_OWNER' && session.user.id) {
-          try {
-            const { data: businessData, error: businessError } = await supabase
-              .from('businesses')
-              .select('*')
-              .eq('owner_id', session.user.id)
-              .single();
-            
-            if (businessError) {
-              console.error('Erro ao buscar business:', businessError);
-              // Não bloquear o fluxo, apenas logar o erro
-            } else if (businessData) {
+            try {
+              const { data: businessData, error: businessError } = await supabase
+                .from('businesses')
+                .select('*')
+                .eq('owner_id', session.user.id)
+                .maybeSingle();
+              
+              if (businessError && businessError.code !== 'PGRST116') {
+                console.error('Erro ao buscar business:', businessError);
+                // Não bloquear o fluxo, apenas logar o erro
+              } else if (businessData) {
               const biz: Business & { mp_access_token?: string | null } = {
                 id: businessData.id,
                 name: businessData.name,
@@ -3982,9 +3982,9 @@ export default function App() {
                   .from('businesses')
                   .select('id')
                   .eq('owner_id', session.user.id)
-                  .single();
+                  .maybeSingle();
                 
-                if (businessError) {
+                if (businessError && businessError.code !== 'PGRST116') {
                   console.error('Erro ao buscar business no getSession:', businessError);
                   // Não bloquear, apenas logar
                 } else if (businessData) {
@@ -4031,9 +4031,9 @@ export default function App() {
                 .from('businesses')
                 .select('*')
                 .eq('owner_id', session.user.id)
-                .single();
+                .maybeSingle();
               
-              if (businessError) {
+              if (businessError && businessError.code !== 'PGRST116') {
                 console.error('Erro ao buscar business completo:', businessError);
                 setBusinessLoadTimeout(true);
               } else if (businessData) {
@@ -4079,9 +4079,9 @@ export default function App() {
             .from('businesses')
             .select('*')
             .eq('owner_id', session.user.id)
-            .single()
+            .maybeSingle()
             .then(({ data: businessData, error }) => {
-              if (error) {
+              if (error && error.code !== 'PGRST116') {
                 console.error('Erro ao buscar business:', error);
                 // Não bloquear o fluxo
               } else if (businessData) {
@@ -4369,6 +4369,7 @@ export default function App() {
           onBack={() => setSelectedBusiness(null)}
           addToast={addToast}
           addToCart={addToCart}
+          user={user}
         />
       );
     }
@@ -4431,9 +4432,9 @@ export default function App() {
                           .from('businesses')
                           .select('*')
                           .eq('owner_id', user.id)
-                          .single();
+                          .maybeSingle();
                         
-                        if (businessError) {
+                        if (businessError && businessError.code !== 'PGRST116') {
                           console.error('Erro ao buscar business:', businessError);
                           addToast('Erro ao buscar estabelecimento. Verifique sua conexão.', 'error');
                           setLoadingBusinesses(false);
