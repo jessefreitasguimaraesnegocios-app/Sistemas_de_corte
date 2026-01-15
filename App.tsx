@@ -1939,6 +1939,85 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
   const [showAuditLogs, setShowAuditLogs] = useState(false);
   const [users, setUsers] = useState<any[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
+  
+  // Estados para dados financeiros
+  const [platformSummary, setPlatformSummary] = useState<any>(null);
+  const [businessSummaries, setBusinessSummaries] = useState<Record<string, any>>({});
+  const [loadingFinance, setLoadingFinance] = useState(false);
+  const [dateRange, setDateRange] = useState({ start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), end: new Date() });
+
+  // Buscar resumo financeiro da plataforma
+  const fetchPlatformSummary = async () => {
+    setLoadingFinance(true);
+    try {
+      const startDate = dateRange.start.toISOString();
+      const endDate = dateRange.end.toISOString();
+      
+      const { data, error } = await supabase.rpc('get_platform_summary', {
+        start_date: startDate,
+        end_date: endDate
+      });
+
+      if (error) {
+        console.error('Erro ao buscar resumo da plataforma:', error);
+        addToast('Erro ao carregar dados financeiros', 'error');
+        return;
+      }
+
+      if (data && data.length > 0) {
+        setPlatformSummary(data[0]);
+      }
+    } catch (error: any) {
+      console.error('Erro ao buscar resumo da plataforma:', error);
+      addToast('Erro ao carregar dados financeiros', 'error');
+    } finally {
+      setLoadingFinance(false);
+    }
+  };
+
+  // Buscar resumo financeiro por business
+  const fetchBusinessSummaries = async () => {
+    if (businesses.length === 0) return;
+    
+    try {
+      const summaries: Record<string, any> = {};
+      const startDate = dateRange.start.toISOString();
+      const endDate = dateRange.end.toISOString();
+
+      await Promise.all(
+        businesses.map(async (business: any) => {
+          const { data, error } = await supabase.rpc('get_business_summary', {
+            business_id_param: business.id,
+            start_date: startDate,
+            end_date: endDate
+          });
+
+          if (!error && data && data.length > 0) {
+            summaries[business.id] = data[0];
+          }
+        })
+      );
+
+      setBusinessSummaries(summaries);
+    } catch (error: any) {
+      console.error('Erro ao buscar resumos dos businesses:', error);
+    }
+  };
+
+  // Calcular MRR (Monthly Recurring Revenue) baseado em monthly_fee dos businesses ativos
+  const calculateMRR = () => {
+    return businesses
+      .filter((b: any) => b.status === 'ACTIVE')
+      .reduce((total: number, b: any) => total + (Number(b.monthlyFee) || 0), 0);
+  };
+
+  // Buscar dados financeiros quando a aba FINANCE for ativada
+  useEffect(() => {
+    if (activeTab === 'FINANCE') {
+      fetchPlatformSummary();
+      fetchBusinessSummaries();
+    }
+  }, [activeTab, dateRange, businesses.length]);
 
   // Buscar usuários do banco de dados
   const fetchUsers = async () => {
@@ -2367,17 +2446,55 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
   const renderTabContent = () => {
     switch (activeTab) {
       case 'FINANCE':
+        const mrr = calculateMRR();
+        const totalAdminFees = platformSummary?.total_admin_fees || 0;
+        const formatCurrency = (value: number) => {
+          if (value >= 1000000) return `R$ ${(value / 1000000).toFixed(1)}M`;
+          if (value >= 1000) return `R$ ${(value / 1000).toFixed(1)}k`;
+          return `R$ ${value.toFixed(2)}`;
+        };
+
         return (
           <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
+             {/* Filtro de período */}
+             <div className="bg-white p-6 rounded-2xl border border-slate-200 flex items-center gap-4">
+               <label className="text-sm font-bold text-slate-700">Período:</label>
+               <input
+                 type="date"
+                 value={dateRange.start.toISOString().split('T')[0]}
+                 onChange={(e) => setDateRange({ ...dateRange, start: new Date(e.target.value) })}
+                 className="px-4 py-2 border border-slate-300 rounded-xl text-sm font-bold"
+               />
+               <span className="text-slate-400">até</span>
+               <input
+                 type="date"
+                 value={dateRange.end.toISOString().split('T')[0]}
+                 onChange={(e) => setDateRange({ ...dateRange, end: new Date(e.target.value) })}
+                 className="px-4 py-2 border border-slate-300 rounded-xl text-sm font-bold"
+               />
+               <button
+                 onClick={() => {
+                   setDateRange({ start: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), end: new Date() });
+                 }}
+                 className="ml-auto text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl hover:bg-indigo-100"
+               >
+                 Últimos 30 dias
+               </button>
+             </div>
+
              <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                 <div className="bg-indigo-600 p-8 rounded-[2rem] text-white shadow-2xl relative overflow-hidden">
                    <p className="text-xs font-black uppercase tracking-widest text-indigo-200">Receita Hub (Split)</p>
-                   <p className="text-4xl font-black mt-2">R$ 142.5k</p>
+                   {loadingFinance ? (
+                     <p className="text-4xl font-black mt-2">Carregando...</p>
+                   ) : (
+                     <p className="text-4xl font-black mt-2">{formatCurrency(totalAdminFees)}</p>
+                   )}
                    <TrendingUp className="absolute -right-4 -bottom-4 opacity-10" size={100} />
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm">
                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">SaaS Recorrente (MRR)</p>
-                   <p className="text-4xl font-black text-slate-900 mt-2">R$ 28.9k</p>
+                   <p className="text-4xl font-black text-slate-900 mt-2">{formatCurrency(mrr)}</p>
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm">
                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Estabelecimentos</p>
@@ -2385,27 +2502,55 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                 </div>
              </div>
              <div className="bg-white rounded-[2.5rem] border border-slate-200 overflow-hidden shadow-sm">
-                <div className="p-8 border-b border-slate-100 flex justify-between items-center"><h4 className="font-black text-slate-900">Extrato Consolidado</h4><button className="text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl">Exportar CSV</button></div>
-                <table className="w-full text-left">
-                  <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                    <tr>
-                      <th className="px-8 py-4">Estabelecimento</th>
-                      <th className="px-8 py-4 text-center">Status Pagamento</th>
-                      <th className="px-8 py-4 text-center">Faturamento Bruto</th>
-                      <th className="px-8 py-4 text-right">Split Líquido Hub</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {businesses.map((b: any) => (
-                      <tr key={b.id} className="text-sm hover:bg-slate-50 transition-colors">
-                        <td className="px-8 py-4 font-bold text-slate-900">{b.name}</td>
-                        <td className="px-8 py-4 text-center"><span className="bg-green-100 text-green-700 text-[10px] font-black px-3 py-1 rounded-full">EM DIA</span></td>
-                        <td className="px-8 py-4 text-center font-medium text-slate-700">R$ 12.400</td>
-                        <td className="px-8 py-4 text-right font-black text-indigo-600">R$ {(12400 * b.revenueSplit / 100).toFixed(2)}</td>
+                <div className="p-8 border-b border-slate-100 flex justify-between items-center">
+                  <h4 className="font-black text-slate-900">Extrato Consolidado</h4>
+                  <button className="text-xs font-black text-indigo-600 bg-indigo-50 px-4 py-2 rounded-xl hover:bg-indigo-100">
+                    Exportar CSV
+                  </button>
+                </div>
+                {loadingFinance ? (
+                  <div className="p-8 text-center text-slate-400">Carregando dados financeiros...</div>
+                ) : (
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50/50 text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                      <tr>
+                        <th className="px-8 py-4">Estabelecimento</th>
+                        <th className="px-8 py-4 text-center">Status Pagamento</th>
+                        <th className="px-8 py-4 text-center">Faturamento Bruto</th>
+                        <th className="px-8 py-4 text-right">Split Líquido Hub</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {businesses.map((b: any) => {
+                        const summary = businessSummaries[b.id];
+                        const totalRevenue = summary?.total_revenue || 0;
+                        const adminFee = summary?.total_admin_fee || 0;
+                        const isPaid = b.status === 'ACTIVE' && (Number(b.monthlyFee) || 0) > 0;
+                        
+                        return (
+                          <tr key={b.id} className="text-sm hover:bg-slate-50 transition-colors">
+                            <td className="px-8 py-4 font-bold text-slate-900">{b.name}</td>
+                            <td className="px-8 py-4 text-center">
+                              <span className={`text-[10px] font-black px-3 py-1 rounded-full ${
+                                isPaid 
+                                  ? 'bg-green-100 text-green-700' 
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}>
+                                {isPaid ? 'EM DIA' : 'PENDENTE'}
+                              </span>
+                            </td>
+                            <td className="px-8 py-4 text-center font-medium text-slate-700">
+                              R$ {totalRevenue.toFixed(2)}
+                            </td>
+                            <td className="px-8 py-4 text-right font-black text-indigo-600">
+                              R$ {adminFee.toFixed(2)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
              </div>
           </div>
         );
