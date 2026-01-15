@@ -362,18 +362,68 @@ export default function CheckoutModal({
         return;
       }
       
-      // NOTA: Em produção, você deve usar o Mercado Pago SDK para gerar o token
-      // Por enquanto, vamos simular um token (isso NÃO funciona em produção real)
-      // Para produção, instale: npm install @mercadopago/sdk-react
-      // e use o componente CardForm do Mercado Pago
+      // Gerar token do cartão usando a API do Mercado Pago
+      // Primeiro, precisamos do access_token do business
+      const { data: businessData } = await supabase
+        .from('businesses')
+        .select('mp_access_token')
+        .eq('id', validBusinessId)
+        .single();
       
-      // Simulação de token (SUBSTITUIR POR SDK REAL EM PRODUÇÃO)
-      const mockToken = `mock_token_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      if (!businessData?.mp_access_token) {
+        setError('Token de acesso do Mercado Pago não configurado para este estabelecimento.');
+        setLoading(false);
+        return;
+      }
       
-      // Em produção, use:
-      // const { token } = await mp.getCardToken({ cardNumber, cardholderName, cardExpirationMonth, cardExpirationYear, securityCode });
+      // Limpar número do cartão (remover espaços)
+      const cardNumberClean = cardNumber.replace(/\s/g, '');
+      const [expMonth, expYear] = cardExpiry.split('/');
       
-      const response = await criarPagamentoCartao(total, email, mockToken, validBusinessId);
+      // Gerar token do cartão via API do Mercado Pago
+      let cardToken: string;
+      try {
+        const tokenResponse = await fetch('https://api.mercadopago.com/v1/card_tokens', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${businessData.mp_access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            card_number: cardNumberClean,
+            cardholder: {
+              name: cardName,
+            },
+            expiration_month: parseInt(expMonth),
+            expiration_year: parseInt('20' + expYear),
+            security_code: cardCvv,
+          }),
+        });
+        
+        if (!tokenResponse.ok) {
+          const errorData = await tokenResponse.json();
+          console.error('Erro ao gerar token do cartão:', errorData);
+          setError(`Erro ao processar dados do cartão: ${errorData.message || 'Token inválido'}`);
+          setLoading(false);
+          return;
+        }
+        
+        const tokenData = await tokenResponse.json();
+        cardToken = tokenData.id;
+        
+        if (!cardToken) {
+          setError('Não foi possível gerar o token do cartão. Verifique os dados e tente novamente.');
+          setLoading(false);
+          return;
+        }
+      } catch (tokenError: any) {
+        console.error('Erro ao gerar token do cartão:', tokenError);
+        setError(`Erro ao processar dados do cartão: ${tokenError.message || 'Erro desconhecido'}`);
+        setLoading(false);
+        return;
+      }
+      
+      const response = await criarPagamentoCartao(total, email, cardToken, validBusinessId);
       
       if (response.success && response.status === 'approved') {
         setCardData(response);
