@@ -235,6 +235,7 @@ serve(async (req: Request) => {
     // Usar API de Orders para suportar split tanto em PIX quanto em cartão
     // A API de Orders suporta marketplace_fee que funciona para ambos os métodos
     // marketplace_fee deve estar no nível raiz da ordem, não dentro de marketplace
+    // IMPORTANTE: Para o split funcionar, é necessário incluir integration_data com sponsor.id
     const orderData: any = {
       type: "online",
       total_amount: valor.toFixed(2),
@@ -245,6 +246,13 @@ serve(async (req: Request) => {
       },
       transactions: {
         payments: []
+      },
+      // Integration data com sponsor ID é OBRIGATÓRIO para split funcionar
+      // O sponsor.id deve ser uma string com o User ID da conta da plataforma
+      integration_data: {
+        sponsor: {
+          id: String(SPONSOR_ID_LOJA)
+        }
       }
     };
 
@@ -293,6 +301,15 @@ serve(async (req: Request) => {
       );
     }
     
+    // Log do payload completo para debug
+    console.log("=== DEBUG SPLIT PAYMENT ===");
+    console.log("Valor total:", valor);
+    console.log("Comissão percentual:", COMISSAO_PERCENTUAL + "%");
+    console.log("Marketplace fee calculado:", marketplace_fee);
+    console.log("Sponsor ID (string):", String(SPONSOR_ID_LOJA));
+    console.log("Payload completo:", JSON.stringify(orderData, null, 2));
+    console.log("===========================");
+    
     // Chamada para API de Orders do Mercado Pago (suporta split nativamente)
     const mp_response = await fetch("https://api.mercadopago.com/v1/orders", {
       method: "POST",
@@ -307,7 +324,7 @@ serve(async (req: Request) => {
     const mp_result = await mp_response.json();
 
     if (!mp_response.ok) {
-      console.error("Erro na API de Orders do Mercado Pago:", mp_result);
+      console.error("❌ Erro na API de Orders do Mercado Pago:", JSON.stringify(mp_result, null, 2));
       return new Response(
         JSON.stringify({ 
           error: mp_result.message || "Erro ao processar pagamento no Mercado Pago",
@@ -320,6 +337,13 @@ serve(async (req: Request) => {
         }
       );
     }
+
+    // Log da resposta do Mercado Pago para verificar split
+    console.log("✅ Resposta do Mercado Pago (Orders API):");
+    console.log("- Order ID:", mp_result.id);
+    console.log("- Marketplace fee enviado:", marketplace_fee);
+    console.log("- Sponsor ID enviado:", String(SPONSOR_ID_LOJA));
+    console.log("- Resposta completa:", JSON.stringify(mp_result, null, 2));
 
     // A API de Orders retorna estrutura diferente
     // Extrair informações do pagamento da resposta
