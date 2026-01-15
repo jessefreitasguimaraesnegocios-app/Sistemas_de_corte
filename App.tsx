@@ -1643,6 +1643,11 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
       addToast('Selecione data e horário', 'error');
       return;
     }
+    if (!user || !user.email) {
+      addToast('É necessário estar logado para finalizar o agendamento', 'error');
+      return;
+    }
+    // Fechar calendário e abrir checkout
     setShowCalendar(false);
     setShowCheckout(true);
   };
@@ -1653,7 +1658,7 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
     const app: Appointment = {
       id: Math.random().toString(),
       businessId: business.id,
-      customerId: 'user1',
+      customerId: user?.id || 'user1',
       collaboratorId: selectedPro.id,
       serviceId: bookingService.id,
       date: selectedDate.toISOString(),
@@ -1662,10 +1667,14 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
     };
     setAppointments([...appointments, app]);
     addToast('Agendamento confirmado com sucesso!', 'success');
+    
+    // Resetar estado
     setBookingService(null);
+    setSelectedPro(null);
     setSelectedDate(null);
     setSelectedTime(null);
     setShowCheckout(false);
+    setShowCalendar(false);
   };
 
   return (
@@ -1892,19 +1901,17 @@ const BusinessDetailView = ({ business, collaborators, services, products, appoi
       )}
 
       {/* Checkout Modal para Agendamento */}
-      {showCheckout && bookingService && (
-        <CheckoutModal
-          isOpen={showCheckout}
-          onClose={() => {
-            setShowCheckout(false);
-            setShowCalendar(true);
-          }}
-          total={bookingService.price}
-          email={user?.email || "cliente@example.com"}
-          businessId={business.id}
-          onPaymentSuccess={handlePaymentSuccess}
-        />
-      )}
+      <CheckoutModal
+        isOpen={showCheckout && !!bookingService}
+        onClose={() => {
+          setShowCheckout(false);
+          setShowCalendar(true);
+        }}
+        total={bookingService?.price || 0}
+        email={user?.email || "cliente@example.com"}
+        businessId={business.id}
+        onPaymentSuccess={handlePaymentSuccess}
+      />
     </div>
   );
 };
