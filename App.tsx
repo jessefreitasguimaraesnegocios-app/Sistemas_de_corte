@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { Routes, Route, useLocation } from 'react-router-dom';
 import { 
   LayoutGrid, Calendar, ShoppingBag, Settings, Users, DollarSign, LogOut, 
