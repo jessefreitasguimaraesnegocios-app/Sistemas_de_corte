@@ -4784,6 +4784,24 @@ export default function App() {
         return;
       }
       
+      // VALIDAÇÃO CRÍTICA: Verificar se session.user existe antes de processar
+      if (!session?.user) {
+        console.warn('⚠️ Sessão existe mas usuário não encontrado:', { 
+          hasSession: !!session, 
+          hasUser: !!session?.user,
+          event 
+        });
+        
+        // Se não tem usuário na sessão, limpar estado e não tentar carregar business
+        if (user) {
+          setUser(null);
+          setUserBusiness(null);
+          setBusinesses([]);
+          setLoadingBusinesses(false);
+        }
+        return;
+      }
+      
       if (session?.user) {
         let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
         let businessId = session.user.user_metadata.business_id;
@@ -4901,7 +4919,12 @@ export default function App() {
           window.history.replaceState({}, '', window.location.pathname);
         }
       } else {
+        // Se não tem session.user, limpar estado completamente
+        // Isso previne tentativas de carregar business quando login falhou
         setUser(null);
+        setUserBusiness(null);
+        setBusinesses([]);
+        setLoadingBusinesses(false);
       }
     });
 
@@ -5016,6 +5039,17 @@ export default function App() {
 
   // Buscar business do usuário quando ele faz login como BUSINESS_OWNER
   useEffect(() => {
+    // VALIDAÇÃO CRÍTICA: Só buscar se user existe E tem ID válido
+    // Se user existe mas não tem ID, significa que o login falhou
+    if (!user || !user.id) {
+      // Se não tem user ou user.id, limpar estado e parar
+      if (userBusiness) {
+        setUserBusiness(null);
+      }
+      setLoadingBusinesses(false);
+      return;
+    }
+    
     // Evitar loops: só buscar se realmente necessário e não estiver carregando
     if (user && user.role === 'BUSINESS_OWNER' && user.id && !userBusiness && !loadingBusinesses && !fetchingUserBusinessRef.current) {
       // Limitar retries
@@ -5836,13 +5870,24 @@ export default function App() {
                           return;
                         }
                         window.localStorage.setItem('pending_role', 'BUSINESS_OWNER');
-                        await signInWithEmail(loginForm.email, loginForm.password);
-                        addToast('Login realizado com sucesso!', 'success');
-                        setShowBusinessLoginModal(false);
-                        setLoginForm({ email: '', password: '', name: '' });
+                        const result = await signInWithEmail(loginForm.email, loginForm.password);
+                        
+                        // Verificar se o login foi bem-sucedido ANTES de mostrar sucesso
+                        if (result?.user) {
+                          addToast('Login realizado com sucesso!', 'success');
+                          setShowBusinessLoginModal(false);
+                          setLoginForm({ email: '', password: '', name: '' });
+                        } else {
+                          throw new Error('Login falhou. Usuário não encontrado.');
+                        }
                       }
                     } catch (error: any) {
-                      console.error('Erro:', error);
+                      console.error('Erro no login:', error);
+                      
+                      // Limpar qualquer estado de loading que possa estar ativo
+                      setLoadingBusinesses(false);
+                      setBusinesses([]);
+                      setUserBusiness(null);
                       
                       // Tratar erro de usuário já registrado
                       if (isSignUp && (
@@ -5860,10 +5905,20 @@ export default function App() {
                           addToast('Tente fazer login com este email e senha.', 'success');
                         }, 2000);
                       } else {
-                        addToast(
-                          error?.message || (isSignUp ? 'Erro ao criar conta' : 'Email ou senha incorretos'),
-                          'error'
-                        );
+                        // Mensagens de erro mais específicas
+                        let errorMessage = 'Email ou senha incorretos';
+                        
+                        if (error?.message?.includes('Invalid login credentials') || 
+                            error?.message?.includes('Invalid credentials') ||
+                            error?.status === 400) {
+                          errorMessage = 'Usuário ou senha não existe. Verifique suas credenciais.';
+                        } else if (error?.message?.includes('Email not confirmed')) {
+                          errorMessage = 'Email não confirmado. Verifique sua caixa de entrada.';
+                        } else if (error?.message) {
+                          errorMessage = error.message;
+                        }
+                        
+                        addToast(errorMessage, 'error');
                       }
                     }
                   }}
@@ -5962,12 +6017,38 @@ export default function App() {
                         return;
                       }
                       window.localStorage.setItem('pending_role', 'SUPER_ADMIN');
-                      await signInWithEmail(adminLoginForm.email, adminLoginForm.password);
-                      addToast('Login realizado com sucesso!', 'success');
-                      setShowAdminLoginModal(false);
-                      setAdminLoginForm({ email: '', password: '' });
+                      const result = await signInWithEmail(adminLoginForm.email, adminLoginForm.password);
+                      
+                      // Verificar se o login foi bem-sucedido ANTES de mostrar sucesso
+                      if (result?.user) {
+                        addToast('Login realizado com sucesso!', 'success');
+                        setShowAdminLoginModal(false);
+                        setAdminLoginForm({ email: '', password: '' });
+                      } else {
+                        throw new Error('Login falhou. Usuário não encontrado.');
+                      }
                     } catch (error: any) {
                       console.error('Erro ao fazer login admin:', error);
+                      
+                      // Limpar qualquer estado de loading que possa estar ativo
+                      setLoadingBusinesses(false);
+                      setBusinesses([]);
+                      setUserBusiness(null);
+                      
+                      // Mensagens de erro mais específicas
+                      let errorMessage = 'Email ou senha incorretos';
+                      
+                      if (error?.message?.includes('Invalid login credentials') || 
+                          error?.message?.includes('Invalid credentials') ||
+                          error?.status === 400) {
+                        errorMessage = 'Usuário ou senha não existe. Verifique suas credenciais.';
+                      } else if (error?.message?.includes('Email not confirmed')) {
+                        errorMessage = 'Email não confirmado. Verifique sua caixa de entrada.';
+                      } else if (error?.message) {
+                        errorMessage = error.message;
+                      }
+                      
+                      addToast(errorMessage, 'error');
                       addToast(
                         error?.message || 'Email ou senha incorretos',
                         'error'
