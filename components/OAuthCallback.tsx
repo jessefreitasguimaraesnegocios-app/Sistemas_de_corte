@@ -50,7 +50,7 @@ export default function OAuthCallback() {
 
         // Timeout de segurança: se não responder em 30 segundos, mostrar erro
         timeoutId = setTimeout(() => {
-          if (isMounted && status === 'loading') {
+          if (isMounted) {
             console.error('⏱️ Timeout ao processar OAuth (30s)');
             setStatus('error');
             setMessage('Tempo de conexão excedido. Por favor, tente novamente.');
