@@ -28,17 +28,19 @@ serve(async (req: Request) => {
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     const apikeyHeader = req.headers.get("apikey") || "";
     
-    console.log("getMpOauthUrl chamada:", {
+    // Log inicial para debug - sempre aparece nos logs
+    console.log("🚀 getMpOauthUrl chamada:", {
       method: req.method,
       url: req.url,
+      timestamp: new Date().toISOString(),
       hasAuthHeader: !!authHeader,
       authHeaderLength: authHeader.length,
       hasApikey: !!apikeyHeader,
       hasMPClientId: !!MP_CLIENT_ID,
+      mpClientIdLength: MP_CLIENT_ID.length,
       hasMPRedirectUri: !!MP_REDIRECT_URI,
       hasSupabaseUrl: !!SUPABASE_URL,
       hasSupabaseAnonKey: !!SUPABASE_ANON_KEY,
-      allHeaders: Object.fromEntries(req.headers.entries()),
     });
 
     // Verificar autenticação (opcional - pode ser removido se a função for pública)
