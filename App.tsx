@@ -4214,18 +4214,52 @@ export default function App() {
     }
   }, []);
 
-  // Função para buscar business do usuário logado
-  const fetchUserBusiness = useCallback(async (userId: string) => {
-    if (!userId) return;
+  // Função para buscar business do usuário logado com retry e refresh de sessão
+  const fetchUserBusiness = useCallback(async (userId: string, retryCount = 0) => {
+    if (!userId) return null;
     
     try {
+      // Verificar e refreshar sessão se necessário
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !sessionData?.session) {
+        console.warn('Sessão inválida, tentando refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError || !refreshData?.session) {
+          console.error('Erro ao refreshar sessão:', refreshError);
+          // Se não conseguir refreshar e for primeira tentativa, tentar novamente
+          if (retryCount < 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return fetchUserBusiness(userId, retryCount + 1);
+          }
+          return null;
+        }
+      }
+      
       const { data: businessData, error: businessError } = await supabase
         .from('businesses')
         .select('*')
         .eq('owner_id', userId)
         .maybeSingle();
       
-      if (businessError && businessError.code !== 'PGRST116') {
+      // Se erro de autenticação, tentar refresh e retry
+      if (businessError) {
+        if (businessError.code === 'PGRST116') {
+          // Não encontrado - não é erro
+          return null;
+        }
+        
+        // Se for erro de autenticação e ainda não tentou refresh, tentar novamente
+        if ((businessError.message?.includes('JWT') || businessError.message?.includes('token') || businessError.status === 401) && retryCount < 2) {
+          console.warn('Erro de autenticação, tentando refresh e retry...', businessError);
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData?.session) {
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            return fetchUserBusiness(userId, retryCount + 1);
+          }
+        }
+        
         console.error('Erro ao buscar business do usuário:', businessError);
         return null;
       }
@@ -4430,7 +4464,33 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const roleParam = urlParams.get('role');
     
-    supabase.auth.onAuthStateChange(async (_event, session) => {
+    // Listener para mudanças de autenticação com refresh automático
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Refresh automático quando token está prestes a expirar
+      if (event === 'TOKEN_REFRESHED' && session) {
+        console.log('✅ Token refreshed automaticamente');
+      }
+      
+      // Se sessão expirou, tentar refresh
+      if (event === 'SIGNED_OUT' || (!session && user)) {
+        console.warn('⚠️ Sessão expirada, tentando refresh...');
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError || !refreshData?.session) {
+            console.error('Não foi possível refreshar sessão:', refreshError);
+            // Se não conseguir, fazer logout
+            setUser(null);
+            return;
+          }
+          // Se conseguiu refreshar, continuar com a sessão atualizada
+          session = refreshData.session;
+        } catch (error) {
+          console.error('Erro ao tentar refresh de sessão:', error);
+          setUser(null);
+          return;
+        }
+      }
+      
       if (session?.user) {
         let userRole = (session.user.user_metadata.role as any) || 'CUSTOMER';
         let businessId = session.user.user_metadata.business_id;
@@ -4551,6 +4611,11 @@ export default function App() {
         setUser(null);
       }
     });
+
+    // Cleanup do subscription
+    return () => {
+      subscription.unsubscribe();
+    };
     
     // Verificar sessão atual ao carregar
     supabase.auth.getSession().then(async ({ data: { session }, error: sessionError }) => {
@@ -4659,6 +4724,43 @@ export default function App() {
       return () => clearTimeout(timer);
     }
   }, [user, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
+
+  // Refresh periódico do userBusiness e sessão (a cada 5 minutos) para evitar problemas após tempo aberto
+  useEffect(() => {
+    if (user && user.role === 'BUSINESS_OWNER' && user.id && userBusiness) {
+      const refreshInterval = setInterval(async () => {
+        try {
+          // Refresh da sessão primeiro para evitar token expirado
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            await supabase.auth.refreshSession();
+          }
+          
+          // Atualizar business para garantir que está sincronizado
+          const biz = await fetchUserBusiness(user.id);
+          if (biz) {
+            setUserBusiness(biz);
+            // Atualizar também na lista de businesses
+            setBusinesses(prev => prev.map(b => b.id === biz.id ? biz : b));
+          }
+        } catch (error) {
+          console.error('Erro no refresh periódico:', error);
+          // Se der erro, tentar refresh da sessão e buscar novamente
+          try {
+            await supabase.auth.refreshSession();
+            const biz = await fetchUserBusiness(user.id);
+            if (biz) {
+              setUserBusiness(biz);
+            }
+          } catch (retryError) {
+            console.error('Erro no retry do refresh:', retryError);
+          }
+        }
+      }, 5 * 60 * 1000); // 5 minutos
+
+      return () => clearInterval(refreshInterval);
+    }
+  }, [user, userBusiness, fetchUserBusiness]);
 
   // Buscar dados quando um business é selecionado
   useEffect(() => {
