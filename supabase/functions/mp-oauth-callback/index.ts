@@ -75,6 +75,7 @@ serve(async (req: Request) => {
     });
 
     if (!code || !state) {
+      console.error('❌ Parâmetros obrigatórios ausentes:', { hasCode: !!code, hasState: !!state });
       return new Response(
         JSON.stringify({ error: "Parâmetros code e state são obrigatórios" }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -117,12 +118,49 @@ serve(async (req: Request) => {
       }),
     });
 
-    const tokenResult = await tokenResponse.json();
+    // Ler resposta do Mercado Pago
+    const responseText = await tokenResponse.text();
+    let tokenResult;
+    
+    try {
+      tokenResult = JSON.parse(responseText);
+    } catch (jsonError) {
+      console.error("❌ Erro ao parsear resposta do Mercado Pago:", jsonError);
+      console.error("Resposta do MP (texto):", responseText.substring(0, 500));
+      return new Response(
+        JSON.stringify({ 
+          error: "Erro ao processar resposta do Mercado Pago", 
+          details: responseText.substring(0, 200),
+          hint: "Verifique se as credenciais do Mercado Pago estão corretas"
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
 
     if (!tokenResponse.ok) {
-      console.error("Erro ao trocar code por token:", tokenResult);
+      console.error("❌ Erro ao trocar code por token:", {
+        status: tokenResponse.status,
+        statusText: tokenResponse.statusText,
+        result: tokenResult
+      });
       return new Response(
-        JSON.stringify({ error: "Erro ao trocar code por token", details: tokenResult }),
+        JSON.stringify({ 
+          error: "Erro ao trocar code por token", 
+          details: tokenResult,
+          status: tokenResponse.status
+        }),
+        { status: tokenResponse.status || 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validar que temos os dados necessários
+    if (!tokenResult || !tokenResult.access_token) {
+      console.error("❌ Resposta do Mercado Pago não contém access_token:", tokenResult);
+      return new Response(
+        JSON.stringify({ 
+          error: "Resposta inválida do Mercado Pago", 
+          details: "access_token não encontrado na resposta"
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
@@ -137,6 +175,8 @@ serve(async (req: Request) => {
     } = tokenResult;
 
     const expiresAt = expires_in ? new Date(Date.now() + expires_in * 1000).toISOString() : null;
+
+    console.log("💾 Salvando tokens no banco para business:", businessId);
 
     // Salvar no Supabase (tabela businesses)
     const { error: updateError } = await supabase
@@ -153,12 +193,18 @@ serve(async (req: Request) => {
       .eq("id", businessId);
 
     if (updateError) {
-      console.error("Erro ao salvar tokens no banco:", updateError);
+      console.error("❌ Erro ao salvar tokens no banco:", updateError);
       return new Response(
-        JSON.stringify({ error: "Erro ao salvar tokens", details: updateError }),
+        JSON.stringify({ 
+          error: "Erro ao salvar tokens no banco de dados", 
+          details: updateError.message,
+          code: updateError.code
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log("✅ Tokens salvos com sucesso para business:", businessId);
 
     return new Response(
       JSON.stringify({

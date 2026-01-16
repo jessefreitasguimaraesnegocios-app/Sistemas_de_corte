@@ -20,6 +20,7 @@ export default function OAuthCallback() {
 
   useEffect(() => {
     let isMounted = true; // Flag para evitar atualizações após desmontagem
+    let timeoutId: NodeJS.Timeout;
 
     const processOAuth = async () => {
       try {
@@ -41,11 +42,27 @@ export default function OAuthCallback() {
         // Obter redirect_uri da URL atual (mesmo usado na autorização)
         const redirectUri = `${window.location.origin}/oauth/callback`;
 
-        console.log('🔄 Processando OAuth callback:', { code: code.substring(0, 10) + '...', state });
+        console.log('🔄 Processando OAuth callback:', { 
+          code: code.substring(0, 10) + '...', 
+          state,
+          redirectUri 
+        });
+
+        // Timeout de segurança: se não responder em 30 segundos, mostrar erro
+        timeoutId = setTimeout(() => {
+          if (isMounted && status === 'loading') {
+            console.error('⏱️ Timeout ao processar OAuth (30s)');
+            setStatus('error');
+            setMessage('Tempo de conexão excedido. Por favor, tente novamente.');
+            setTimeout(() => {
+              if (isMounted) navigate('/');
+            }, 3000);
+          }
+        }, 30000); // 30 segundos
 
         // Chamar a Edge Function do Supabase para processar o OAuth
         // IMPORTANTE: A função agora é pública (--no-verify-jwt) porque o Mercado Pago não envia token
-        const { data, error } = await supabase.functions.invoke('mp-oauth-callback', {
+        const invokePromise = supabase.functions.invoke('mp-oauth-callback', {
           body: {
             code,
             state,
@@ -53,20 +70,44 @@ export default function OAuthCallback() {
           }
         });
 
+        // Aguardar resposta com timeout
+        const { data, error } = await invokePromise;
+
+        // Limpar timeout se chegou aqui
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+
         if (!isMounted) return; // Evitar atualizações após desmontagem
 
         if (error) {
           console.error('❌ Erro ao processar OAuth:', error);
-          setStatus('error');
-          setMessage(
-            error.message || 
-            'Erro ao conectar com o Mercado Pago. Verifique suas credenciais e tente novamente.'
-          );
+          console.error('Detalhes do erro:', {
+            message: error.message,
+            name: error.name,
+            context: error.context
+          });
           
-          // Redirecionar após 3 segundos em caso de erro
+          setStatus('error');
+          
+          // Mensagem de erro mais específica
+          let errorMessage = 'Erro ao conectar com o Mercado Pago.';
+          if (error.message?.includes('403') || error.message?.includes('Forbidden')) {
+            errorMessage = 'Acesso negado. Verifique suas credenciais no Mercado Pago.';
+          } else if (error.message?.includes('401') || error.message?.includes('Unauthorized')) {
+            errorMessage = 'Não autorizado. Verifique se a função está configurada corretamente.';
+          } else if (error.message?.includes('timeout') || error.message?.includes('Timeout')) {
+            errorMessage = 'Tempo de conexão excedido. Tente novamente.';
+          } else if (error.message) {
+            errorMessage = error.message;
+          }
+          
+          setMessage(errorMessage);
+          
+          // Redirecionar após 5 segundos em caso de erro
           setTimeout(() => {
             if (isMounted) navigate('/');
-          }, 3000);
+          }, 5000);
           return;
         }
 
@@ -134,11 +175,14 @@ export default function OAuthCallback() {
     // Processar OAuth quando o componente montar
     processOAuth();
 
-    // Cleanup: marcar como desmontado
+    // Cleanup: marcar como desmontado e limpar timeout
     return () => {
       isMounted = false;
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     };
-  }, [searchParams, navigate]);
+  }, [searchParams, navigate, status]);
 
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center p-6">
