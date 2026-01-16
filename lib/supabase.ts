@@ -30,15 +30,17 @@ export const supabase = (() => {
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         storageKey: SUPABASE_STORAGE_KEY,
-        autoRefreshToken: true, // Refresh automático quando token está prestes a expirar
+        autoRefreshToken: true, // CRÍTICO: Refresh automático quando token está prestes a expirar
         persistSession: true, // Persistir sessão no localStorage
         detectSessionInUrl: true,
+        storage: typeof window !== 'undefined' ? window.localStorage : undefined, // Storage explícito
         // Configurações para manter sessão ativa
         flowType: 'pkce' // Usar PKCE para melhor segurança e refresh automático
       }
     });
     
     // Listener global para refresh automático silencioso
+    // NOTA: Este listener é apenas para logs - o listener principal está no App.tsx
     supabaseInstance.auth.onAuthStateChange((event, session) => {
       if (event === 'TOKEN_REFRESHED') {
         // Refresh silencioso - não precisa logar

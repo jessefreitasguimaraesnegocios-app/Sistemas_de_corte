@@ -4202,6 +4202,17 @@ export default function App() {
 
   // Função para buscar businesses do banco de dados
   const fetchBusinesses = useCallback(async () => {
+    // Validar sessão ANTES de buscar
+    const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+    
+    if (sessionError || !session) {
+      console.warn('⚠️ Sem sessão válida ao buscar businesses');
+      setLoadingBusinesses(false);
+      setBusinesses([]);
+      // Não redirecionar aqui - deixar o onAuthStateChange fazer isso
+      return;
+    }
+    
     // Evitar múltiplas chamadas simultâneas
     if (fetchingBusinessesRef.current) {
       console.log('⏸️ fetchBusinesses já em execução, ignorando chamada duplicada');
@@ -4311,18 +4322,21 @@ export default function App() {
     fetchingUserBusinessRef.current = true;
     
     try {
-      // Verificar sessão (o Supabase já faz refresh automático)
+      // Verificar sessão ANTES de buscar business
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       
-      // Se não tem sessão, tentar refresh silencioso (sem log de erro)
+      // Se não tem sessão, tentar refresh silencioso
       if (sessionError || !sessionData?.session) {
-        // Tentar refresh silencioso (sem logar como erro)
+        console.warn('⚠️ Sem sessão válida ao buscar userBusiness, tentando refresh...');
+        // Tentar refresh silencioso
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData?.session) {
-          // Só logar como erro se realmente não conseguir após retry
+          // Se não conseguir refreshar após múltiplas tentativas, retornar null
           if (retryCount >= MAX_RETRIES) {
-            console.error('Erro ao refreshar sessão após múltiplas tentativas:', refreshError);
+            console.error('❌ Não foi possível renovar sessão após múltiplas tentativas');
+            // Não redirecionar aqui - deixar o onAuthStateChange fazer isso
+            return null;
           }
           // Se não conseguir refreshar e for primeira tentativa, tentar novamente
           if (retryCount < 1) {
@@ -4529,8 +4543,27 @@ export default function App() {
   // Carregar businesses quando o app inicia (apenas uma vez)
   useEffect(() => {
     let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
     
     const loadBusinesses = async () => {
+      // Validar sessão ANTES de buscar businesses
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      
+      if (sessionError || !session) {
+        console.warn('⚠️ Sem sessão válida ao tentar carregar businesses');
+        if (isMounted) {
+          setLoadingBusinesses(false);
+          setBusinesses([]);
+          // Se não estiver na página de login, redirecionar
+          if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
+            setTimeout(() => {
+              window.location.href = '/';
+            }, 500);
+          }
+        }
+        return;
+      }
+      
       // Evitar múltiplas chamadas
       if (fetchingBusinessesRef.current) {
         return;
@@ -4542,15 +4575,37 @@ export default function App() {
         console.error('Erro ao carregar businesses:', error);
         if (isMounted) {
           setLoadingBusinesses(false);
-          setBusinessLoadTimeout(false); // Não marcar como timeout, apenas erro
+          setBusinessLoadTimeout(false);
         }
       }
     };
+    
+    // Timeout de segurança: se não carregar em 10 segundos, parar loading e verificar sessão
+    timeoutId = setTimeout(async () => {
+      if (isMounted && loadingBusinesses) {
+        console.warn('⏱️ Timeout ao carregar businesses, verificando sessão...');
+        
+        // Verificar se sessão ainda é válida
+        const { data: { session } } = await supabase.auth.getSession();
+        if (!session) {
+          console.warn('⚠️ Sessão expirada durante timeout, redirecionando para login');
+          setLoadingBusinesses(false);
+          setBusinesses([]);
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/';
+          }
+        } else {
+          // Sessão válida mas demorou - apenas parar loading
+          setLoadingBusinesses(false);
+        }
+      }
+    }, 10000); // 10 segundos
     
     loadBusinesses();
     
     return () => {
       isMounted = false;
+      clearTimeout(timeoutId);
     };
   }, []); // Executar apenas uma vez na montagem
 
@@ -4559,29 +4614,53 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const roleParam = urlParams.get('role');
     
-    // Listener para mudanças de autenticação com refresh automático preventivo
+    // Listener para mudanças de autenticação - CRÍTICO para detectar sessão expirada
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('🔐 AUTH EVENT:', event, { hasSession: !!session, hasUser: !!user });
+      
       // Refresh automático quando token está prestes a expirar (silencioso)
       if (event === 'TOKEN_REFRESHED' && session) {
-        // Não logar - refresh automático silencioso
-        // O Supabase já faz isso automaticamente com autoRefreshToken: true
+        // Token foi renovado com sucesso - continuar normalmente
+        console.log('✅ Token refreshed com sucesso');
+        return;
       }
       
-      // Se sessão expirou (SIGNED_OUT), só fazer logout se realmente foi logout manual
-      // Não tentar refresh aqui - o Supabase já faz isso automaticamente
-      if (event === 'SIGNED_OUT') {
-        // Só fazer logout se realmente foi um logout manual
-        // Não tentar refresh - se foi logout manual, não devemos tentar recuperar
-        if (!session) {
-          setUser(null);
+      // Sessão expirada ou logout - REDIRECIONAR PARA LOGIN
+      if (event === 'SIGNED_OUT' || (!session && event !== 'TOKEN_REFRESHED')) {
+        console.warn('⚠️ Sessão expirada ou logout detectado:', event);
+        setUser(null);
+        setLoadingBusinesses(false);
+        
+        // Se não estiver na página de login, redirecionar
+        if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
+          // Limpar dados locais
+          setBusinesses([]);
+          setUserBusiness(null);
+          
+          // Redirecionar para login após pequeno delay para evitar loop
+          setTimeout(() => {
+            window.location.href = '/';
+          }, 500);
         }
         return;
       }
       
       // Se não tem sessão mas tinha usuário, pode ser refresh em andamento
-      // Não fazer nada - deixar o Supabase gerenciar
-      if (!session && user && event !== 'SIGNED_OUT') {
-        // Pode ser refresh em andamento, aguardar
+      // Aguardar um pouco antes de considerar como expirado
+      if (!session && user && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') {
+        // Aguardar 2 segundos para ver se o refresh acontece
+        setTimeout(async () => {
+          const { data: { session: checkSession } } = await supabase.auth.getSession();
+          if (!checkSession && user) {
+            // Após 2 segundos ainda sem sessão = expirada
+            console.warn('⚠️ Sessão não renovada após 2s, redirecionando para login');
+            setUser(null);
+            setLoadingBusinesses(false);
+            if (window.location.pathname !== '/login') {
+              window.location.href = '/';
+            }
+          }
+        }, 2000);
         return;
       }
       
@@ -5162,10 +5241,8 @@ export default function App() {
       }
       
       // Se não encontrou o business e ainda está carregando, mostrar loading
-      // Mas não travar indefinidamente - permitir uso do sistema após um tempo curto
+      // Com timeout para evitar loading infinito (já implementado no useEffect de carregamento)
       if (!biz && loadingBusinesses) {
-        // Usar um timeout curto apenas como fallback de segurança
-        // O loading será desligado automaticamente quando fetchBusinesses terminar
         return (
           <div className="flex items-center justify-center min-h-[calc(100vh-64px)] bg-slate-50">
             <div className="text-center">

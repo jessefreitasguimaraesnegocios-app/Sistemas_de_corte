@@ -72,6 +72,33 @@ export default function OAuthCallback() {
 
         // Sucesso - atualizar estado e redirecionar
         console.log('✅ OAuth processado com sucesso:', data);
+        
+        // IMPORTANTE: Garantir que a sessão ainda é válida após OAuth
+        // O OAuth pode ter causado problemas na sessão
+        try {
+          const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+          
+          if (sessionError || !session) {
+            console.warn('⚠️ Sessão inválida após OAuth, tentando refresh...');
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            
+            if (refreshError || !refreshData?.session) {
+              console.error('❌ Não foi possível renovar sessão após OAuth');
+              setStatus('error');
+              setMessage('Sessão expirada. Por favor, faça login novamente.');
+              setTimeout(() => {
+                if (isMounted) {
+                  supabase.auth.signOut();
+                  navigate('/');
+                }
+              }, 3000);
+              return;
+            }
+          }
+        } catch (err) {
+          console.error('Erro ao verificar sessão após OAuth:', err);
+        }
+        
         setStatus('success');
         setMessage('Mercado Pago conectado com sucesso! Redirecionando...');
 
