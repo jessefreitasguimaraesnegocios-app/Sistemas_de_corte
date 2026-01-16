@@ -4086,6 +4086,7 @@ export default function App() {
   const fetchingBusinessesRef = useRef(false);
   const fetchingUserBusinessRef = useRef(false);
   const retryCountRef = useRef(0);
+  const redirectingRef = useRef(false); // Flag para evitar múltiplos redirecionamentos
   const MAX_RETRIES = 2; // Limitar tentativas
   
   // Cart State Management
@@ -4552,12 +4553,12 @@ export default function App() {
       
       if (sessionError || !session) {
         // Sem sessão - pode ser estado inicial (normal) ou sessão expirada
-        // Não redirecionar aqui - deixar o onAuthStateChange tratar
-        console.log('ℹ️ Sem sessão ao carregar businesses (pode ser estado inicial)');
+        // NÃO redirecionar aqui - deixar o onAuthStateChange tratar apenas se necessário
+        // NÃO fazer nada que possa causar recarregamento da página
         if (isMounted) {
           setLoadingBusinesses(false);
           setBusinesses([]);
-          // Não redirecionar aqui - o onAuthStateChange vai tratar se necessário
+          // Não fazer mais nada - evitar qualquer ação que cause recarregamento
         }
         return;
       }
@@ -4586,12 +4587,12 @@ export default function App() {
         // Verificar se sessão ainda é válida
         const { data: { session } } = await supabase.auth.getSession();
         if (!session) {
-          console.warn('⚠️ Sessão expirada durante timeout, redirecionando para login');
+          // Sem sessão - apenas parar loading, NÃO redirecionar
+          // Redirecionar pode causar loop e apagar dados do formulário
+          console.log('ℹ️ Sem sessão durante timeout (pode ser estado inicial)');
           setLoadingBusinesses(false);
           setBusinesses([]);
-          if (window.location.pathname !== '/login') {
-            window.location.href = '/';
-          }
+          // NÃO redirecionar aqui - pode estar na página inicial tentando fazer login
         } else {
           // Sessão válida mas demorou - apenas parar loading
           setLoadingBusinesses(false);
@@ -4614,12 +4615,19 @@ export default function App() {
     
     // Listener para mudanças de autenticação - CRÍTICO para detectar sessão expirada
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      // Evitar processar eventos durante redirecionamento
+      if (redirectingRef.current) {
+        return;
+      }
+      
       console.log('🔐 AUTH EVENT:', event, { hasSession: !!session, hasUser: !!user });
       
       // INITIAL_SESSION sem sessão é normal no primeiro carregamento - não tratar como erro
+      // CRÍTICO: Não fazer NADA neste caso para evitar loops
       if (event === 'INITIAL_SESSION') {
         if (!session) {
           // Estado inicial sem sessão - normal, não fazer nada
+          // NÃO redirecionar, NÃO limpar dados, apenas retornar
           console.log('ℹ️ Estado inicial sem sessão (normal)');
           return;
         }
@@ -4634,40 +4642,86 @@ export default function App() {
       }
       
       // Sessão expirada ou logout explícito - REDIRECIONAR PARA LOGIN
-      // IMPORTANTE: Não tratar INITIAL_SESSION aqui
-      if (event === 'SIGNED_OUT' || (event === 'USER_UPDATED' && !session)) {
-        console.warn('⚠️ Sessão expirada ou logout detectado:', event);
+      // IMPORTANTE: Apenas redirecionar se realmente for logout explícito
+      // NÃO redirecionar se estiver na página inicial ou em modais de login
+      if (event === 'SIGNED_OUT') {
+        // Verificar se realmente é um logout (não apenas estado inicial)
+        const isOnLoginPage = window.location.pathname === '/' || 
+                             window.location.pathname === '/login' ||
+                             showBusinessLoginModal || 
+                             showAdminLoginModal;
+        
+        if (isOnLoginPage) {
+          // Já está na página de login - apenas limpar estado
+          setUser(null);
+          setLoadingBusinesses(false);
+          return;
+        }
+        
+        console.warn('⚠️ Logout detectado:', event);
+        redirectingRef.current = true;
         setUser(null);
         setLoadingBusinesses(false);
         
-        // Se não estiver na página de login, redirecionar
-        if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
-          // Limpar dados locais
-          setBusinesses([]);
-          setUserBusiness(null);
-          
-          // Redirecionar para login após pequeno delay para evitar loop
+        // Limpar dados locais
+        setBusinesses([]);
+        setUserBusiness(null);
+        
+        // NÃO redirecionar se já estiver na página inicial ou em modais de login
+        // Redirecionar apenas se estiver em uma página protegida
+        const isOnHomePage = window.location.pathname === '/' || 
+                            window.location.pathname === '/login' ||
+                            showBusinessLoginModal || 
+                            showAdminLoginModal;
+        
+        if (!isOnHomePage && !window.location.pathname.includes('/oauth/callback')) {
           setTimeout(() => {
+            if (!redirectingRef.current) return; // Verificar novamente antes de redirecionar
             window.location.href = '/';
+            redirectingRef.current = false;
           }, 500);
+        } else {
+          redirectingRef.current = false;
         }
         return;
       }
       
       // Se não tem sessão mas tinha usuário (e não é INITIAL_SESSION), pode ser refresh em andamento
       // Aguardar um pouco antes de considerar como expirado
+      // IMPORTANTE: Não fazer nada se estiver na página inicial
       if (!session && user && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED' && event !== 'INITIAL_SESSION') {
+        const isOnLoginPage = window.location.pathname === '/' || 
+                             window.location.pathname === '/login' ||
+                             showBusinessLoginModal || 
+                             showAdminLoginModal;
+        
+        if (isOnLoginPage) {
+          // Está na página de login - não fazer nada
+          return;
+        }
+        
         // Aguardar 2 segundos para ver se o refresh acontece
         setTimeout(async () => {
+          if (redirectingRef.current) return;
+          
           const { data: { session: checkSession } } = await supabase.auth.getSession();
           if (!checkSession && user) {
             // Após 2 segundos ainda sem sessão = expirada
             console.warn('⚠️ Sessão não renovada após 2s, redirecionando para login');
+            redirectingRef.current = true;
             setUser(null);
             setLoadingBusinesses(false);
-            if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
+            
+            // NÃO redirecionar se já estiver na página inicial ou em modais de login
+            const isOnHomePage = window.location.pathname === '/' || 
+                                window.location.pathname === '/login' ||
+                                showBusinessLoginModal || 
+                                showAdminLoginModal;
+            
+            if (!isOnHomePage && !window.location.pathname.includes('/oauth/callback')) {
               window.location.href = '/';
             }
+            redirectingRef.current = false;
           }
         }, 2000);
         return;
