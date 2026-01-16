@@ -5337,32 +5337,39 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
-      // Limpar estados antes de fazer logout
+      // Limpar todos os estados ANTES de fazer logout
       setUser(null);
       setUserBusiness(null);
       setBusinesses([]);
+      setSelectedBusiness(null);
+      setCart([]);
       setLoadingBusinesses(false);
       setBusinessLoadTimeout(false);
+      setLoadingData(false);
       retryCountRef.current = 0;
       fetchingBusinessesRef.current = false;
       fetchingUserBusinessRef.current = false;
-      
-      // Fazer logout no Supabase
-      await supabase.auth.signOut();
+      redirectingRef.current = false;
       
       // Limpar localStorage
       window.localStorage.removeItem('pending_role');
       
-      // Redirecionar para home
-      window.location.href = '/';
+      // Fazer logout no Supabase
+      await supabase.auth.signOut();
+      
+      // Não redirecionar imediatamente - deixar o componente renderizar a tela de login
+      // O redirecionamento será feito pelo onAuthStateChange se necessário
     } catch (error) {
       console.error('Erro ao fazer logout:', error);
       // Mesmo com erro, limpar estado local
       setUser(null);
       setUserBusiness(null);
       setBusinesses([]);
+      setSelectedBusiness(null);
+      setCart([]);
       setLoadingBusinesses(false);
-      window.location.href = '/';
+      setBusinessLoadTimeout(false);
+      window.localStorage.removeItem('pending_role');
     }
   };
   
@@ -5602,19 +5609,19 @@ export default function App() {
                     // Fazer logout e garantir que funciona
                     try {
                       await handleLogout();
-                      // Após logout, mostrar modal de login após um delay
-                      setTimeout(() => {
-                        setShowBusinessLoginModal(true);
-                      }, 500);
+                      // Após logout, mostrar modal de login
+                      setShowBusinessLoginModal(true);
                     } catch (error) {
                       console.error('Erro ao fazer logout:', error);
-                      // Mesmo com erro, forçar limpeza e redirecionamento
+                      // Mesmo com erro, forçar limpeza
                       setUser(null);
                       setUserBusiness(null);
                       setBusinesses([]);
                       setLoadingBusinesses(false);
+                      setBusinessLoadTimeout(false);
                       window.localStorage.removeItem('pending_role');
-                      window.location.href = '/';
+                      // Mostrar modal de login mesmo com erro
+                      setShowBusinessLoginModal(true);
                     }
                   }}
                   className="w-full px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-black hover:bg-slate-200 transition-all"
