@@ -170,10 +170,10 @@ serve(async (req: Request) => {
         console.log("🔍 Tentando buscar pelo external_reference...");
         
         // Buscar payment no Mercado Pago para obter o external_reference (order_id)
-        // Mas precisamos do access token... Vamos tentar buscar em todos os businesses
+        // Tentar buscar em todos os businesses com token para encontrar a transação
         const { data: allBusinesses } = await supabase
           .from("businesses")
-          .select("id, mp_access_token")
+          .select("id, mp_access_token, mp_live_mode")
           .not("mp_access_token", "is", null);
         
         if (allBusinesses && allBusinesses.length > 0) {
@@ -234,11 +234,11 @@ serve(async (req: Request) => {
       // Buscar business para obter access token e buscar status atualizado
       const { data: business, error: businessError } = await supabase
         .from("businesses")
-        .select("mp_access_token, mp_access_token_test")
+        .select("mp_access_token, mp_live_mode")
         .eq("id", transaction.business_id)
         .single();
 
-      if (businessError || (!business?.mp_access_token && !business?.mp_access_token_test)) {
+      if (businessError || !business?.mp_access_token) {
         console.error("❌ Business não encontrado ou sem token:", businessError);
         return new Response(
           JSON.stringify({ error: "Business não encontrado ou sem token configurado" }),
@@ -249,9 +249,11 @@ serve(async (req: Request) => {
         );
       }
 
-      // Primeiro, buscar payment para verificar live_mode
-      // Tentar com token de produção primeiro
-      let accessToken = business.mp_access_token || business.mp_access_token_test;
+      // Usar o access token do business (OAuth já garante que é do ambiente correto)
+      const accessToken = business.mp_access_token;
+      const businessLiveMode = business.mp_live_mode; // true = produção, false = teste
+      
+      // Buscar payment para verificar status e live_mode
       let mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
         method: "GET",
         headers: {
@@ -259,19 +261,6 @@ serve(async (req: Request) => {
           "Content-Type": "application/json",
         },
       });
-
-      // Se falhar com token de produção, tentar com token de teste
-      if (!mp_response.ok && business.mp_access_token_test && business.mp_access_token_test !== business.mp_access_token) {
-        console.log("⚠️ Tentando com token de teste...");
-        accessToken = business.mp_access_token_test;
-        mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${resourceId}`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        });
-      }
 
       if (!mp_response.ok) {
         console.error("❌ Erro ao buscar payment no Mercado Pago:", await mp_response.text());
@@ -287,20 +276,15 @@ serve(async (req: Request) => {
       const paymentData = await mp_response.json();
       const status = paymentData.status; // approved, pending, rejected, cancelled, refunded
       const statusDetail = paymentData.status_detail;
-      const liveMode = paymentData.live_mode; // true = produção, false = teste
+      const paymentLiveMode = paymentData.live_mode; // true = produção, false = teste
 
-      // VERIFICAÇÃO DE AMBIENTE: Verificar se o token corresponde ao ambiente
-      const isProductionToken = accessToken?.startsWith("APP_USR-");
-      const isTestToken = accessToken?.startsWith("TEST-");
-      
-      if (liveMode === true && isTestToken) {
-        console.warn("⚠️ ATENÇÃO: Payment de PRODUÇÃO sendo buscado com token de TESTE!");
-        console.warn("⚠️ Configure mp_access_token (produção) no business para pagamentos reais.");
-      } else if (liveMode === false && isProductionToken) {
-        console.warn("⚠️ ATENÇÃO: Payment de TESTE sendo buscado com token de PRODUÇÃO!");
-        console.warn("⚠️ Configure mp_access_token_test no business para pagamentos de teste.");
+      // VERIFICAÇÃO DE AMBIENTE: Verificar se o token corresponde ao ambiente do payment
+      // O business.mp_live_mode deve corresponder ao payment.live_mode
+      if (businessLiveMode !== undefined && businessLiveMode !== null && paymentLiveMode !== businessLiveMode) {
+        console.warn(`⚠️ ATENÇÃO: Ambiente do payment (${paymentLiveMode ? "PRODUÇÃO" : "TESTE"}) não corresponde ao token do business (${businessLiveMode ? "PRODUÇÃO" : "TESTE"})!`);
+        console.warn("⚠️ O token pode estar incorreto ou o payment foi criado em ambiente diferente.");
       } else {
-        console.log(`✅ Ambiente correto: ${liveMode ? "PRODUÇÃO" : "TESTE"} com token ${isProductionToken ? "PRODUÇÃO" : "TESTE"}`);
+        console.log(`✅ Ambiente correto: Payment ${paymentLiveMode ? "PRODUÇÃO" : "TESTE"} com token ${businessLiveMode ? "PRODUÇÃO" : "TESTE"}`);
       }
 
       console.log(`📊 Payment Data:`, {
@@ -458,11 +442,11 @@ serve(async (req: Request) => {
       // Buscar business para obter access token
       const { data: business, error: businessError } = await supabase
         .from("businesses")
-        .select("mp_access_token, mp_access_token_test")
+        .select("mp_access_token, mp_live_mode")
         .eq("id", transaction.business_id)
         .single();
 
-      if (businessError || (!business?.mp_access_token && !business?.mp_access_token_test)) {
+      if (businessError || !business?.mp_access_token) {
         console.error("❌ Business não encontrado ou sem token:", businessError);
         return new Response(
           JSON.stringify({ error: "Business não encontrado ou sem token configurado" }),
@@ -473,8 +457,11 @@ serve(async (req: Request) => {
         );
       }
 
-      // Tentar com token de produção primeiro
-      let accessToken = business.mp_access_token || business.mp_access_token_test;
+      // Usar o access token do business (OAuth já garante que é do ambiente correto)
+      const accessToken = business.mp_access_token;
+      const businessLiveMode = business.mp_live_mode; // true = produção, false = teste
+      
+      // Buscar order no Mercado Pago
       let order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
         method: "GET",
         headers: {
@@ -482,19 +469,6 @@ serve(async (req: Request) => {
           "Content-Type": "application/json",
         },
       });
-
-      // Se falhar, tentar com token de teste
-      if (!order_response.ok && business.mp_access_token_test && business.mp_access_token_test !== business.mp_access_token) {
-        console.log("⚠️ Tentando buscar order com token de teste...");
-        accessToken = business.mp_access_token_test;
-        order_response = await fetch(`https://api.mercadopago.com/merchant_orders/${resourceId}`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${accessToken}`,
-            "Content-Type": "application/json",
-          },
-        });
-      }
 
       if (!order_response.ok) {
         console.error("❌ Erro ao buscar order no Mercado Pago:", await order_response.text());
@@ -509,9 +483,19 @@ serve(async (req: Request) => {
 
       const orderData = await order_response.json();
       const payments = orderData.payments || [];
-      const liveMode = orderData.live_mode; // true = produção, false = teste
+      const orderLiveMode = orderData.live_mode; // true = produção, false = teste
       
-      // VERIFICAÇÃO DE AMBIENTE
+      // VERIFICAÇÃO DE AMBIENTE: Verificar se o token corresponde ao ambiente do order
+      if (businessLiveMode !== undefined && businessLiveMode !== null && orderLiveMode !== businessLiveMode) {
+        console.warn(`⚠️ ATENÇÃO: Ambiente do order (${orderLiveMode ? "PRODUÇÃO" : "TESTE"}) não corresponde ao token do business (${businessLiveMode ? "PRODUÇÃO" : "TESTE"})!`);
+      } else {
+        console.log(`✅ Ambiente correto: Order ${orderLiveMode ? "PRODUÇÃO" : "TESTE"} com token ${businessLiveMode ? "PRODUÇÃO" : "TESTE"}`);
+      }
+      
+      // Usar orderLiveMode para processar payments
+      const liveMode = orderLiveMode;
+      
+      // Fallback para verificação antiga (remover depois)
       const isProductionToken = accessToken?.startsWith("APP_USR-");
       const isTestToken = accessToken?.startsWith("TEST-");
       
