@@ -124,21 +124,52 @@ export async function criarPagamentoPix(
         businessId
       });
       
-      const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify({
+      // Usar supabase.functions.invoke em vez de fetch direto
+      // Isso garante que o Supabase gerencie a autenticação corretamente
+      const { data, error } = await supabase.functions.invoke('createPayment', {
+        body: {
           valor,
           metodo_pagamento: 'pix',
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        }),
+        },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
+      
+      // Converter resposta do invoke para formato compatível com código existente
+      let responseData = data;
+      let responseError = error;
+      let response: Response | null = null;
+      
+      if (error) {
+        // Se houver erro, criar um objeto Response simulado para manter compatibilidade
+        response = {
+          ok: false,
+          status: error.status || 401,
+          statusText: error.message || 'Unauthorized',
+          headers: new Headers(),
+          json: async () => ({ code: error.status || 401, message: error.message || 'Invalid JWT' }),
+          text: async () => error.message || 'Invalid JWT',
+        } as any;
+        responseError = error;
+      } else {
+        response = {
+          ok: true,
+          status: 200,
+          statusText: 'OK',
+          headers: new Headers(),
+          json: async () => data,
+          text: async () => JSON.stringify(data),
+        } as any;
+      }
+      
+      // Continuar com o código existente usando response simulado
+      if (!response) {
+        throw new Error('Erro ao criar resposta');
+      }
       
       // Tentar parsear a resposta como JSON
       const contentType = response.headers.get('content-type');
@@ -323,45 +354,38 @@ export async function criarPagamentoCartao(
         businessId
       });
       
-      const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'apikey': supabaseAnonKey,
-        },
-        body: JSON.stringify({
+      // Usar supabase.functions.invoke em vez de fetch direto
+      // O Supabase client gerencia automaticamente a autenticação
+      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
+        body: {
           valor,
           metodo_pagamento: 'credit_card',
           email_cliente: email,
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        }),
+        },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
       
-      // Tentar parsear a resposta como JSON
-      const contentType = response.headers.get('content-type');
-      if (contentType && contentType.includes('application/json')) {
-        responseData = await response.json();
-      } else {
-        const text = await response.text();
-        if (text) {
-          try {
-            responseData = JSON.parse(text);
-          } catch (e) {
-            responseData = { error: text };
-          }
-        }
-      }
-      
-      if (!response.ok) {
-        responseError = new Error(responseData?.error || `HTTP ${response.status}: ${response.statusText}`);
-        console.error('❌ Erro HTTP da Edge Function:', {
-          status: response.status,
-          statusText: response.statusText,
-          body: responseData
+      // Processar resposta do invoke
+      if (invokeError) {
+        responseError = invokeError;
+        responseData = {
+          error: invokeError.message || 'Erro ao criar pagamento',
+          code: invokeError.status || 401,
+          message: invokeError.message || 'Invalid JWT'
+        };
+        console.error('❌ Erro ao chamar createPayment:', {
+          error: invokeError,
+          message: invokeError.message,
+          status: invokeError.status,
+          context: invokeError.context
         });
+      } else {
+        responseData = invokeData;
       }
     } catch (fetchError: any) {
       console.error('❌ Erro ao fazer fetch para Edge Function:', fetchError);
