@@ -63,7 +63,23 @@ export async function criarPagamentoPix(
     try {
       // Obter sessão e garantir que o token está válido
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      let accessToken = sessionData?.session?.access_token;
+      
+      // VALIDAÇÃO CRÍTICA: Verificar se sessão E usuário existem
+      if (!sessionData?.session) {
+        console.error('❌ ERRO: Sessão não existe');
+        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
+      }
+      
+      if (!sessionData.session.user) {
+        console.error('❌ ERRO CRÍTICO: Sessão existe mas usuário não!', {
+          hasSession: !!sessionData.session,
+          hasUser: !!sessionData.session.user,
+          session: sessionData.session
+        });
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+      
+      let accessToken = sessionData.session.access_token;
       
       // Verificar se o token está expirado
       if (sessionData?.session?.expires_at) {
@@ -122,14 +138,17 @@ export async function criarPagamentoPix(
         throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
       }
       
-      // Log detalhado do token
-      console.log('🔐 TOKEN VALIDADO:', {
-        tipo: typeof accessToken,
+      // Log detalhado do token e sessão
+      console.log('🔐 VALIDAÇÃO COMPLETA:', {
+        hasSession: !!sessionData?.session,
+        hasUser: !!sessionData?.session?.user,
+        userId: sessionData?.session?.user?.id,
+        tokenType: typeof accessToken,
         isString: typeof accessToken === 'string',
         hasToken: !!accessToken,
-        tokenLength: accessToken.length,
-        tokenPreview: accessToken.substring(0, 30) + '...',
-        startsWithEyJ: accessToken.startsWith('eyJ'), // JWT sempre começa com eyJ
+        tokenLength: accessToken?.length,
+        tokenPreview: accessToken?.substring(0, 30) + '...',
+        startsWithEyJ: accessToken?.startsWith('eyJ'), // JWT sempre começa com eyJ
         expiresAt: sessionData?.session?.expires_at,
         businessId
       });
@@ -265,7 +284,23 @@ export async function criarPagamentoCartao(
     try {
       // Obter sessão e garantir que o token está válido
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      let accessToken = sessionData?.session?.access_token;
+      
+      // VALIDAÇÃO CRÍTICA: Verificar se sessão E usuário existem
+      if (!sessionData?.session) {
+        console.error('❌ ERRO: Sessão não existe');
+        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
+      }
+      
+      if (!sessionData.session.user) {
+        console.error('❌ ERRO CRÍTICO: Sessão existe mas usuário não!', {
+          hasSession: !!sessionData.session,
+          hasUser: !!sessionData.session.user,
+          session: sessionData.session
+        });
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+      
+      let accessToken = sessionData.session.access_token;
       
       // Verificar se o token está expirado
       if (sessionData?.session?.expires_at) {
@@ -324,14 +359,17 @@ export async function criarPagamentoCartao(
         throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
       }
       
-      // Log detalhado do token
-      console.log('🔐 TOKEN VALIDADO (cartão):', {
-        tipo: typeof accessToken,
+      // Log detalhado do token e sessão
+      console.log('🔐 VALIDAÇÃO COMPLETA (cartão):', {
+        hasSession: !!sessionData?.session,
+        hasUser: !!sessionData?.session?.user,
+        userId: sessionData?.session?.user?.id,
+        tokenType: typeof accessToken,
         isString: typeof accessToken === 'string',
         hasToken: !!accessToken,
-        tokenLength: accessToken.length,
-        tokenPreview: accessToken.substring(0, 30) + '...',
-        startsWithEyJ: accessToken.startsWith('eyJ'), // JWT sempre começa com eyJ
+        tokenLength: accessToken?.length,
+        tokenPreview: accessToken?.substring(0, 30) + '...',
+        startsWithEyJ: accessToken?.startsWith('eyJ'), // JWT sempre começa com eyJ
         expiresAt: sessionData?.session?.expires_at,
         businessId
       });
