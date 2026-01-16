@@ -30,8 +30,21 @@ serve(async (req: Request) => {
       );
     }
 
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+    // Verificar Authorization header (case-insensitive)
+    const authHeader = req.headers.get("authorization") || 
+                       req.headers.get("Authorization") || 
+                       req.headers.get("AUTHORIZATION") || 
+                       "";
+    
+    console.log("🔍 Debug updateBusinessConfig:", {
+      hasAuthHeader: !!authHeader,
+      authHeaderLength: authHeader.length,
+      authHeaderPreview: authHeader ? `${authHeader.substring(0, 30)}...` : "null",
+      allHeaders: Object.fromEntries(req.headers.entries()),
+    });
+    
     if (!authHeader) {
+      console.error("❌ Authorization header ausente");
       return new Response(
         JSON.stringify({ error: "Authorization header ausente" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },
@@ -45,7 +58,15 @@ serve(async (req: Request) => {
     });
 
     const { data: userData, error: userError } = await supabaseUser.auth.getUser();
+    
+    console.log("👤 Verificação de usuário:", {
+      hasUser: !!userData?.user,
+      userId: userData?.user?.id,
+      userError: userError?.message,
+    });
+    
     if (userError || !userData?.user) {
+      console.error("❌ Usuário inválido ou não autenticado:", userError);
       return new Response(
         JSON.stringify({ error: "Usuário inválido ou não autenticado", details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } },

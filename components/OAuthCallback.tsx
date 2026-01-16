@@ -19,6 +19,8 @@ export default function OAuthCallback() {
   const [message, setMessage] = useState<string>('Conectando Mercado Pago...');
 
   useEffect(() => {
+    let isMounted = true; // Flag para evitar atualizações após desmontagem
+
     const processOAuth = async () => {
       try {
         // Ler o parâmetro code da URL
@@ -27,10 +29,11 @@ export default function OAuthCallback() {
 
         // Validar que temos os parâmetros necessários
         if (!code || !state) {
+          if (!isMounted) return;
           setStatus('error');
           setMessage('Parâmetros de autenticação inválidos. Por favor, tente novamente.');
           setTimeout(() => {
-            navigate('/');
+            if (isMounted) navigate('/');
           }, 3000);
           return;
         }
@@ -38,8 +41,10 @@ export default function OAuthCallback() {
         // Obter redirect_uri da URL atual (mesmo usado na autorização)
         const redirectUri = `${window.location.origin}/oauth/callback`;
 
+        console.log('🔄 Processando OAuth callback:', { code: code.substring(0, 10) + '...', state });
+
         // Chamar a Edge Function do Supabase para processar o OAuth
-        // IMPORTANTE: Passar redirect_uri para garantir que seja o mesmo usado na autorização
+        // IMPORTANTE: A função agora é pública (--no-verify-jwt) porque o Mercado Pago não envia token
         const { data, error } = await supabase.functions.invoke('mp-oauth-callback', {
           body: {
             code,
@@ -48,8 +53,10 @@ export default function OAuthCallback() {
           }
         });
 
+        if (!isMounted) return; // Evitar atualizações após desmontagem
+
         if (error) {
-          console.error('Erro ao processar OAuth:', error);
+          console.error('❌ Erro ao processar OAuth:', error);
           setStatus('error');
           setMessage(
             error.message || 
@@ -58,40 +65,52 @@ export default function OAuthCallback() {
           
           // Redirecionar após 3 segundos em caso de erro
           setTimeout(() => {
-            navigate('/');
+            if (isMounted) navigate('/');
           }, 3000);
           return;
         }
 
         // Sucesso - atualizar estado e redirecionar
-        console.log('OAuth processado com sucesso:', data);
+        console.log('✅ OAuth processado com sucesso:', data);
         setStatus('success');
         setMessage('Mercado Pago conectado com sucesso! Redirecionando...');
 
         // Redirecionar para a página principal após 1.5 segundos
         setTimeout(() => {
-          navigate('/', { 
-            state: { 
-              oauthSuccess: true,
-              message: 'Mercado Pago conectado com sucesso!'
-            }
-          });
+          if (isMounted) {
+            navigate('/', { 
+              state: { 
+                oauthSuccess: true,
+                message: 'Mercado Pago conectado com sucesso!'
+              }
+            });
+          }
         }, 1500);
 
       } catch (err: any) {
-        console.error('Erro inesperado ao processar OAuth:', err);
+        if (!isMounted) return; // Evitar atualizações após desmontagem
+        
+        console.error('❌ Erro inesperado ao processar OAuth:', err);
         setStatus('error');
-        setMessage('Erro inesperado. Por favor, tente novamente mais tarde.');
+        setMessage(
+          err?.message || 
+          'Erro inesperado. Por favor, tente novamente mais tarde.'
+        );
         
         // Redirecionar após 3 segundos
         setTimeout(() => {
-          navigate('/');
+          if (isMounted) navigate('/');
         }, 3000);
       }
     };
 
     // Processar OAuth quando o componente montar
     processOAuth();
+
+    // Cleanup: marcar como desmontado
+    return () => {
+      isMounted = false;
+    };
   }, [searchParams, navigate]);
 
   return (

@@ -36,7 +36,43 @@ serve(async (req: Request) => {
       );
     }
 
-    const { code, state, redirect_uri } = await req.json();
+    // Aceitar parâmetros tanto do body (JSON) quanto da query string (URL)
+    // O Mercado Pago pode enviar via query string, mas o frontend também pode enviar via body
+    let code: string | null = null;
+    let state: string | null = null;
+    let redirect_uri: string | null = null;
+
+    // Tentar ler da query string primeiro (formato do Mercado Pago)
+    const url = new URL(req.url);
+    code = url.searchParams.get('code') || null;
+    state = url.searchParams.get('state') || null;
+
+    // Se não encontrou na query string, tentar ler do body (formato do frontend)
+    if (!code || !state) {
+      try {
+        const body = await req.json();
+        code = body.code || code;
+        state = body.state || state;
+        redirect_uri = body.redirect_uri || null;
+      } catch (e) {
+        // Body não é JSON válido, usar apenas query string
+        console.log('⚠️ Body não é JSON, usando apenas query string');
+      }
+    } else {
+      // Se veio da query string, tentar ler redirect_uri do body se existir
+      try {
+        const body = await req.json();
+        redirect_uri = body.redirect_uri || null;
+      } catch (e) {
+        // Ignorar se body não for JSON
+      }
+    }
+
+    console.log('🔍 Parâmetros recebidos:', { 
+      hasCode: !!code, 
+      hasState: !!state, 
+      hasRedirectUri: !!redirect_uri 
+    });
 
     if (!code || !state) {
       return new Response(

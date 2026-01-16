@@ -2786,16 +2786,59 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
 
       // Atualizar no Supabase via Edge Function (bypass RLS)
       // IMPORTANT: passar Authorization explicitamente (evita 401 quando o invoke não envia o JWT)
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      let accessToken = sessionData?.session?.access_token;
 
+      // Se não tiver token, tentar refresh silencioso
       if (sessionError || !accessToken) {
-        console.error('❌ Sem sessão/Access Token para chamar updateBusinessConfig:', sessionError);
-        addToast('Sessão expirada. Faça login novamente e tente salvar.', 'error');
-        setLoading(false);
-        return;
+        console.warn('⚠️ Sessão não encontrada, tentando refresh...');
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError || !refreshData?.session?.access_token) {
+            console.error('❌ Sem sessão/Access Token para chamar updateBusinessConfig:', sessionError || refreshError);
+            addToast('Sessão expirada. Faça login novamente e tente salvar.', 'error');
+            setLoading(false);
+            return;
+          }
+          accessToken = refreshData.session.access_token;
+          sessionData = refreshData;
+        } catch (refreshErr) {
+          console.error('❌ Erro ao refreshar sessão:', refreshErr);
+          addToast('Sessão expirada. Faça login novamente e tente salvar.', 'error');
+          setLoading(false);
+          return;
+        }
       }
 
+      // Verificar se o token é válido (não está expirado)
+      if (sessionData?.session?.expires_at) {
+        const expiresAt = sessionData.session.expires_at;
+        const now = Math.floor(Date.now() / 1000);
+        if (expiresAt <= now) {
+          console.warn('⚠️ Token expirado, tentando refresh...');
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshError || !refreshData?.session?.access_token) {
+            console.error('❌ Erro ao refreshar sessão expirada:', refreshError);
+            addToast('Sessão expirada. Faça login novamente e tente salvar.', 'error');
+            setLoading(false);
+            return;
+          }
+          accessToken = refreshData.session.access_token;
+        }
+      }
+
+      // Log para debug
+      console.log('🔐 Chamando updateBusinessConfig com token:', {
+        business_id: editingBusiness.id,
+        hasToken: !!accessToken,
+        tokenLength: accessToken?.length,
+        tokenPreview: accessToken ? `${accessToken.substring(0, 20)}...` : 'null',
+        expiresAt: sessionData?.session?.expires_at,
+      });
+
+      // Chamar Edge Function com Authorization header explícito
+      // IMPORTANTE: O Supabase client pode adicionar automaticamente um header Authorization,
+      // mas vamos garantir que estamos usando o token mais recente e válido
       const { data: fnData, error: fnError } = await supabase.functions.invoke('updateBusinessConfig', {
         body: {
           business_id: editingBusiness.id,
