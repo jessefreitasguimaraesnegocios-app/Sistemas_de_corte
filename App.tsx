@@ -5336,6 +5336,37 @@ export default function App() {
   const cartTotal = cart.reduce((acc, item) => acc + (item.product.price * item.quantity), 0);
 
   const handleLogout = async () => {
+    try {
+      // Limpar estados antes de fazer logout
+      setUser(null);
+      setUserBusiness(null);
+      setBusinesses([]);
+      setLoadingBusinesses(false);
+      setBusinessLoadTimeout(false);
+      retryCountRef.current = 0;
+      fetchingBusinessesRef.current = false;
+      fetchingUserBusinessRef.current = false;
+      
+      // Fazer logout no Supabase
+      await supabase.auth.signOut();
+      
+      // Limpar localStorage
+      window.localStorage.removeItem('pending_role');
+      
+      // Redirecionar para home
+      window.location.href = '/';
+    } catch (error) {
+      console.error('Erro ao fazer logout:', error);
+      // Mesmo com erro, limpar estado local
+      setUser(null);
+      setUserBusiness(null);
+      setBusinesses([]);
+      setLoadingBusinesses(false);
+      window.location.href = '/';
+    }
+  };
+  
+  const handleLogoutOld = async () => {
     await signOut();
     setUser(null);
     setSelectedBusiness(null);
@@ -5455,7 +5486,34 @@ export default function App() {
       }
       
       // Se não encontrou o business após carregar, mostrar erro (mas não travar)
+      // IMPORTANTE: Verificar se o usuário realmente está autenticado antes de mostrar este erro
       if (!biz && !loadingBusinesses) {
+        // Verificar se o problema é autenticação inválida (usuário não existe)
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (!sessionData?.session?.user) {
+          // Se não tem usuário na sessão, fazer logout e mostrar mensagem de login
+          handleLogout();
+          return (
+            <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
+              <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
+                <AlertCircle className="text-red-500 mx-auto mb-4" size={48} />
+                <h3 className="text-2xl font-black text-slate-900 mb-2">Sessão inválida</h3>
+                <p className="text-slate-600 mb-6">
+                  Sua sessão expirou ou é inválida. Por favor, faça login novamente.
+                </p>
+                <button
+                  onClick={() => {
+                    setShowBusinessLoginModal(true);
+                  }}
+                  className="w-full bg-indigo-600 text-white py-3 rounded-xl font-black text-lg hover:bg-indigo-700 transition-all"
+                >
+                  Fazer Login
+                </button>
+              </div>
+            </div>
+          );
+        }
+        
         return (
           <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
             <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
@@ -5470,6 +5528,7 @@ export default function App() {
                     // Resetar estados
                     setBusinessLoadTimeout(false);
                     setLoadingBusinesses(true);
+                    retryCountRef.current = 0; // Resetar contador de retries
                     
                     // Tentar buscar novamente
                     if (user.id) {
@@ -5539,9 +5598,24 @@ export default function App() {
                   Tentar Novamente
                 </button>
                 <button
-                  onClick={() => {
-                    // Fazer logout
-                    handleLogout();
+                  onClick={async () => {
+                    // Fazer logout e garantir que funciona
+                    try {
+                      await handleLogout();
+                      // Após logout, mostrar modal de login após um delay
+                      setTimeout(() => {
+                        setShowBusinessLoginModal(true);
+                      }, 500);
+                    } catch (error) {
+                      console.error('Erro ao fazer logout:', error);
+                      // Mesmo com erro, forçar limpeza e redirecionamento
+                      setUser(null);
+                      setUserBusiness(null);
+                      setBusinesses([]);
+                      setLoadingBusinesses(false);
+                      window.localStorage.removeItem('pending_role');
+                      window.location.href = '/';
+                    }
                   }}
                   className="w-full px-6 py-3 bg-slate-100 text-slate-700 rounded-xl font-black hover:bg-slate-200 transition-all"
                 >
@@ -5583,7 +5657,18 @@ export default function App() {
               Ocorreu um erro ao carregar o estabelecimento. Tente fazer logout e login novamente.
             </p>
             <button
-              onClick={() => handleLogout()}
+              onClick={async () => {
+                try {
+                  await handleLogout();
+                } catch (error) {
+                  console.error('Erro ao fazer logout:', error);
+                  // Forçar limpeza mesmo com erro
+                  setUser(null);
+                  setUserBusiness(null);
+                  setBusinesses([]);
+                  window.location.href = '/';
+                }
+              }}
               className="w-full px-6 py-3 bg-indigo-600 text-white rounded-xl font-black hover:bg-indigo-700 transition-all"
             >
               Fazer Logout
