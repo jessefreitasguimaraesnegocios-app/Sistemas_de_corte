@@ -3,11 +3,16 @@
 
 // @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+// @ts-ignore
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || Deno.env.get("SUPABASE_PROJECT_URL") || "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 
 // Credenciais do app do Mercado Pago (configure como secrets na função)
 const MP_CLIENT_ID = Deno.env.get("MP_CLIENT_ID") || "";
@@ -19,6 +24,36 @@ serve(async (req: Request) => {
   }
 
   try {
+    // Verificar autenticação
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+    if (!authHeader) {
+      return new Response(
+        JSON.stringify({ error: "Authorization header ausente" }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validar token com Supabase
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      return new Response(
+        JSON.stringify({ error: "Configuração do Supabase incompleta" }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      global: { headers: { Authorization: authHeader } },
+      auth: { persistSession: false },
+    });
+
+    const { data: userData, error: userError } = await supabase.auth.getUser();
+    if (userError || !userData?.user) {
+      return new Response(
+        JSON.stringify({ error: "Usuário inválido ou não autenticado", details: userError?.message }),
+        { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     if (!MP_CLIENT_ID || !MP_REDIRECT_URI) {
       return new Response(
         JSON.stringify({ 

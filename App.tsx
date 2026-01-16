@@ -377,9 +377,22 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     }
 
     try {
+      // Obter token de autenticação para chamar Edge Function
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      const accessToken = sessionData?.session?.access_token;
+
+      if (sessionError || !accessToken) {
+        console.error('❌ Sem sessão/Access Token para chamar getMpOauthUrl:', sessionError);
+        addToast('Sessão expirada. Faça login novamente.', 'error');
+        return;
+      }
+
       // Chamar Edge Function para obter URL de OAuth
       const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
-        body: { business_id: business.id }
+        body: { business_id: business.id },
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
 
       if (error) {
