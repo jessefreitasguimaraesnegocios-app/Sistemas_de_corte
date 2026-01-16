@@ -429,13 +429,18 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         return;
       }
 
-      if (!data?.oauth_url) {
+      // Verificar se temos a URL (pode vir como 'url' ou 'oauth_url')
+      const oauthUrl = data?.url || data?.oauth_url;
+      
+      if (!oauthUrl) {
         addToast('Erro: URL de OAuth não retornada', 'error');
         return;
       }
 
+      console.log('✅ Redirecionando para URL OAuth:', oauthUrl);
+      
       // Redirecionar para URL de OAuth
-      window.location.href = data.oauth_url;
+      window.location.href = oauthUrl;
     } catch (err: any) {
       console.error('Erro ao iniciar OAuth:', err);
       addToast('Erro ao conectar ao Mercado Pago', 'error');
