@@ -4921,11 +4921,10 @@ export default function App() {
           });
           
           // Se for BUSINESS_OWNER, buscar o business completo do banco
-          if (userRole === 'BUSINESS_OWNER' && session.user.id) {
-            const biz = await fetchUserBusiness(session.user.id);
-            if (!biz) {
-              setBusinessLoadTimeout(true);
-            }
+          // Mas apenas se não estiver já buscando (evitar múltiplas chamadas)
+          if (userRole === 'BUSINESS_OWNER' && session.user.id && !fetchingUserBusinessRef.current && !userBusiness) {
+            // Não aguardar aqui - deixar o useEffect específico fazer isso
+            // Isso evita múltiplas chamadas simultâneas
           }
         } catch (error) {
           console.error('Erro ao processar sessão:', error);
@@ -4954,15 +4953,27 @@ export default function App() {
         return;
       }
       
+      // Verificar se já está buscando (proteção adicional)
+      if (fetchingUserBusinessRef.current) {
+        return;
+      }
+      
       retryCountRef.current += 1;
       
       // Aguardar um pouco para garantir que fetchBusinesses terminou
       const timer = setTimeout(async () => {
+        // Verificar novamente antes de chamar
+        if (fetchingUserBusinessRef.current || userBusiness) {
+          return;
+        }
+        
         const biz = await fetchUserBusiness(user.id);
-        if (!biz && retryCountRef.current < MAX_RETRIES) {
+        if (!biz && retryCountRef.current < MAX_RETRIES && !fetchingUserBusinessRef.current) {
           // Se não encontrou, tentar novamente após um delay maior
           setTimeout(async () => {
-            await fetchUserBusiness(user.id, 1);
+            if (!fetchingUserBusinessRef.current && !userBusiness) {
+              await fetchUserBusiness(user.id, 1);
+            }
           }, 3000);
         }
         // Não marcar timeout - permitir que o sistema continue funcionando
@@ -5000,8 +5011,13 @@ export default function App() {
 
   // Refresh periódico do userBusiness (a cada 5 minutos) para manter dados atualizados
   useEffect(() => {
-    if (user && user.role === 'BUSINESS_OWNER' && user.id && userBusiness) {
+    if (user && user.role === 'BUSINESS_OWNER' && user.id && userBusiness && !fetchingUserBusinessRef.current) {
       const refreshInterval = setInterval(async () => {
+        // Verificar se já está buscando antes de tentar novamente
+        if (fetchingUserBusinessRef.current) {
+          return;
+        }
+        
         try {
           // Atualizar business para garantir que está sincronizado
           const biz = await fetchUserBusiness(user.id);
@@ -5499,7 +5515,15 @@ export default function App() {
 
   // Recarregar business após OAuth bem-sucedido
   useEffect(() => {
-    if (location.state?.oauthSuccess && user?.role === 'BUSINESS_OWNER' && user?.id) {
+    if (location.state?.oauthSuccess && user?.role === 'BUSINESS_OWNER' && user?.id && !fetchingUserBusinessRef.current) {
+      // Verificar se já tem o business antes de buscar novamente
+      if (userBusiness && userBusiness.mp_access_token) {
+        // Já tem token, apenas mostrar toast
+        addToast(location.state?.message || 'Mercado Pago conectado com sucesso!', 'success');
+        window.history.replaceState({}, document.title, location.pathname);
+        return;
+      }
+      
       // Recarregar business do usuário após OAuth
       fetchUserBusiness(user.id).then(() => {
         addToast(location.state?.message || 'Mercado Pago conectado com sucesso!', 'success');
@@ -5507,7 +5531,7 @@ export default function App() {
         window.history.replaceState({}, document.title, location.pathname);
       });
     }
-  }, [location.state, user, fetchUserBusiness, addToast]);
+  }, [location.state, user, userBusiness, fetchUserBusiness, addToast]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">
