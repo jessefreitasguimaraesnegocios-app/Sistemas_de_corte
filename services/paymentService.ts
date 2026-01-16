@@ -69,12 +69,42 @@ export async function criarPagamentoPix(
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       let accessToken = sessionData?.session?.access_token;
       
+      // Verificar se o token está expirado
+      if (sessionData?.session?.expires_at) {
+        const expiresAt = sessionData.session.expires_at;
+        const now = Math.floor(Date.now() / 1000);
+        const timeUntilExpiry = expiresAt - now;
+        
+        console.log('⏰ Verificando expiração do token:', {
+          expiresAt,
+          now,
+          timeUntilExpiry,
+          isExpired: expiresAt <= now,
+          expiresInSeconds: timeUntilExpiry
+        });
+        
+        // Se expira em menos de 60 segundos ou já expirou, fazer refresh
+        if (timeUntilExpiry < 60) {
+          console.log('⚠️ Token expirando em breve ou expirado, fazendo refresh...');
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          
+          if (refreshError || !refreshData?.session?.access_token) {
+            console.error('❌ Erro ao refreshar sessão:', refreshError);
+            throw new Error('Sessão expirada. Por favor, faça login novamente.');
+          }
+          
+          accessToken = refreshData.session.access_token;
+          console.log('✅ Sessão renovada com sucesso');
+        }
+      }
+      
       // Se não há sessão ou token, tentar refresh
       if (sessionError || !accessToken) {
         console.log('⚠️ Sessão inválida ou expirada, tentando refresh...');
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData?.session?.access_token) {
+          console.error('❌ Erro ao refreshar sessão:', refreshError);
           throw new Error('Sessão expirada. Por favor, faça login novamente.');
         }
         
@@ -89,6 +119,8 @@ export async function criarPagamentoPix(
       console.log('🔐 Chamando createPayment (PIX) com token:', {
         hasToken: !!accessToken,
         tokenLength: accessToken.length,
+        tokenPreview: accessToken.substring(0, 20) + '...',
+        expiresAt: sessionData?.session?.expires_at,
         businessId
       });
       
@@ -236,12 +268,42 @@ export async function criarPagamentoCartao(
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       let accessToken = sessionData?.session?.access_token;
       
+      // Verificar se o token está expirado
+      if (sessionData?.session?.expires_at) {
+        const expiresAt = sessionData.session.expires_at;
+        const now = Math.floor(Date.now() / 1000);
+        const timeUntilExpiry = expiresAt - now;
+        
+        console.log('⏰ Verificando expiração do token:', {
+          expiresAt,
+          now,
+          timeUntilExpiry,
+          isExpired: expiresAt <= now,
+          expiresInSeconds: timeUntilExpiry
+        });
+        
+        // Se expira em menos de 60 segundos ou já expirou, fazer refresh
+        if (timeUntilExpiry < 60) {
+          console.log('⚠️ Token expirando em breve ou expirado, fazendo refresh...');
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          
+          if (refreshError || !refreshData?.session?.access_token) {
+            console.error('❌ Erro ao refreshar sessão:', refreshError);
+            throw new Error('Sessão expirada. Por favor, faça login novamente.');
+          }
+          
+          accessToken = refreshData.session.access_token;
+          console.log('✅ Sessão renovada com sucesso');
+        }
+      }
+      
       // Se não há sessão ou token, tentar refresh
       if (sessionError || !accessToken) {
         console.log('⚠️ Sessão inválida ou expirada, tentando refresh...');
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData?.session?.access_token) {
+          console.error('❌ Erro ao refreshar sessão:', refreshError);
           throw new Error('Sessão expirada. Por favor, faça login novamente.');
         }
         
@@ -256,6 +318,8 @@ export async function criarPagamentoCartao(
       console.log('🔐 Chamando createPayment (cartão) com token:', {
         hasToken: !!accessToken,
         tokenLength: accessToken.length,
+        tokenPreview: accessToken.substring(0, 20) + '...',
+        expiresAt: sessionData?.session?.expires_at,
         businessId
       });
       

@@ -34,8 +34,22 @@ serve(async (req: Request) => {
 
   try {
     // Validar autenticação do usuário
-    const authHeader = req.headers.get("Authorization");
+    const authHeader = req.headers.get("authorization") || 
+                      req.headers.get("Authorization") || 
+                      req.headers.get("AUTHORIZATION") || 
+                      "";
+    
+    console.log("🔍 Debug createPayment:", {
+      hasAuthHeader: !!authHeader,
+      authHeaderLength: authHeader.length,
+      authHeaderPreview: authHeader ? `${authHeader.substring(0, 30)}...` : "null",
+      hasSupabaseUrl: !!SUPABASE_URL,
+      hasAnonKey: !!SUPABASE_ANON_KEY,
+      hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY,
+    });
+    
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.error("❌ Authorization header ausente ou inválido");
       return new Response(
         JSON.stringify({ 
           error: "Não autorizado. Token de autenticação não fornecido.",
@@ -53,6 +67,7 @@ serve(async (req: Request) => {
     
     // Validar credenciais do Supabase antes de criar cliente
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
+      console.error("❌ Configuração do Supabase incompleta");
       return new Response(
         JSON.stringify({ 
           error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY devem estar configuradas." 
@@ -77,15 +92,28 @@ serve(async (req: Request) => {
       },
     });
 
+    console.log("🔐 Tentando validar usuário com token...");
+    
     // Verificar se o usuário está autenticado
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
     
+    console.log("👤 Resultado da validação:", {
+      hasUser: !!user,
+      userId: user?.id,
+      userError: userError ? {
+        message: userError.message,
+        name: userError.name,
+        status: userError.status,
+      } : null,
+    });
+    
     if (userError || !user) {
-      console.error("Erro ao validar usuário:", userError);
+      console.error("❌ Erro ao validar usuário:", userError);
       return new Response(
         JSON.stringify({ 
           error: "Não autorizado. Token inválido ou expirado.",
-          hint: "Faça login novamente ou renove sua sessão."
+          hint: "Faça login novamente ou renove sua sessão.",
+          details: userError?.message || "Token não pôde ser validado"
         }),
         { 
           status: 401, 
