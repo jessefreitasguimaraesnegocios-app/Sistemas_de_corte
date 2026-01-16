@@ -70,17 +70,17 @@ serve(async (req: Request) => {
 
     console.log("✅ Usuário autenticado:", userData.user.id);
 
-    if (!MP_CLIENT_ID || !MP_REDIRECT_URI) {
+    if (!MP_CLIENT_ID) {
       return new Response(
         JSON.stringify({ 
-          error: "MP_CLIENT_ID ou MP_REDIRECT_URI não configurados nos secrets da função",
-          hint: "Configure os secrets no Supabase Dashboard: Edge Functions → Settings → Secrets"
+          error: "MP_CLIENT_ID não configurado nos secrets da função",
+          hint: "Configure o secret MP_CLIENT_ID no Supabase Dashboard: Edge Functions → Settings → Secrets"
         }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const { business_id } = await req.json();
+    const { business_id, redirect_uri } = await req.json();
 
     if (!business_id) {
       return new Response(
@@ -89,14 +89,30 @@ serve(async (req: Request) => {
       );
     }
 
+    // Usar redirect_uri do body (dinâmico do frontend) ou fallback para secret
+    // Isso permite funcionar em dev (localhost) e produção (vercel) sem reconfigurar secrets
+    const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
+    
+    if (!finalRedirectUri) {
+      return new Response(
+        JSON.stringify({ 
+          error: "redirect_uri não fornecido e MP_REDIRECT_URI não configurado",
+          hint: "Configure o secret MP_REDIRECT_URI no Supabase Dashboard OU passe redirect_uri no body da requisição"
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("✅ Usando redirect_uri:", finalRedirectUri);
+
     // Construir URL de OAuth do Mercado Pago
-    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(MP_CLIENT_ID)}&redirect_uri=${encodeURIComponent(MP_REDIRECT_URI)}&state=${encodeURIComponent(business_id)}&platform_id=mp&prompt=login`;
+    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(MP_CLIENT_ID)}&redirect_uri=${encodeURIComponent(finalRedirectUri)}&state=${encodeURIComponent(business_id)}&platform_id=mp&prompt=login`;
 
     return new Response(
       JSON.stringify({
         success: true,
         oauth_url: oauthUrl,
-        redirect_uri: MP_REDIRECT_URI
+        redirect_uri: finalRedirectUri
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );

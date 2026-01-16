@@ -29,14 +29,14 @@ serve(async (req: Request) => {
   }
 
   try {
-    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET || !MP_REDIRECT_URI) {
+    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET) {
       return new Response(
-        JSON.stringify({ error: "MP_CLIENT_ID/MP_CLIENT_SECRET/MP_REDIRECT_URI não configurados" }),
+        JSON.stringify({ error: "MP_CLIENT_ID ou MP_CLIENT_SECRET não configurados nos secrets" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    const { code, state } = await req.json();
+    const { code, state, redirect_uri } = await req.json();
 
     if (!code || !state) {
       return new Response(
@@ -50,6 +50,22 @@ serve(async (req: Request) => {
     // state carrega o business_id para associar tokens
     const businessId = state;
 
+    // Usar redirect_uri do body (mesmo usado na autorização) ou fallback para secret
+    // IMPORTANTE: O redirect_uri deve ser EXATAMENTE o mesmo usado na URL de autorização
+    const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
+    
+    if (!finalRedirectUri) {
+      return new Response(
+        JSON.stringify({ 
+          error: "redirect_uri não fornecido e MP_REDIRECT_URI não configurado",
+          hint: "Configure o secret MP_REDIRECT_URI no Supabase Dashboard OU passe redirect_uri no body"
+        }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    console.log("🔄 Trocando code por token com redirect_uri:", finalRedirectUri);
+
     // Trocar code por tokens no Mercado Pago
     const tokenResponse = await fetch("https://api.mercadopago.com/oauth/token", {
       method: "POST",
@@ -61,7 +77,7 @@ serve(async (req: Request) => {
         client_id: MP_CLIENT_ID,
         code,
         grant_type: "authorization_code",
-        redirect_uri: MP_REDIRECT_URI,
+        redirect_uri: finalRedirectUri, // Usar o mesmo redirect_uri da autorização
       }),
     });
 

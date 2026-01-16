@@ -35,11 +35,16 @@ export default function OAuthCallback() {
           return;
         }
 
+        // Obter redirect_uri da URL atual (mesmo usado na autorização)
+        const redirectUri = `${window.location.origin}/oauth/callback`;
+
         // Chamar a Edge Function do Supabase para processar o OAuth
+        // IMPORTANTE: Passar redirect_uri para garantir que seja o mesmo usado na autorização
         const { data, error } = await supabase.functions.invoke('mp-oauth-callback', {
           body: {
             code,
-            state
+            state,
+            redirect_uri: redirectUri // Mesmo redirect_uri usado na URL de autorização
           }
         });
 

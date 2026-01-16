@@ -387,15 +387,23 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         return;
       }
 
+      // Construir redirect URI dinamicamente baseado na URL atual
+      const redirectUri = `${window.location.origin}/oauth/callback`;
+      
       console.log('🔐 Chamando getMpOauthUrl com token:', {
         businessId: business.id,
         hasToken: !!accessToken,
         tokenLength: accessToken?.length,
+        redirectUri,
       });
 
       // Chamar Edge Function para obter URL de OAuth
+      // Passar redirect_uri dinamicamente para evitar problemas com URLs diferentes (dev/prod)
       const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
-        body: { business_id: business.id },
+        body: { 
+          business_id: business.id,
+          redirect_uri: redirectUri // URL dinâmica do frontend
+        },
         headers: {
           Authorization: `Bearer ${accessToken}`,
         },

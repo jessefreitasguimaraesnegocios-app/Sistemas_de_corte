@@ -24,12 +24,13 @@ Se você está recebendo erro `401 (Unauthorized)` ao tentar conectar ao Mercado
   - Selecione seu app
   - Copie o **Client ID** (Production ou Test, dependendo do ambiente)
 
-#### Secret 2: `MP_REDIRECT_URI`
+#### Secret 2: `MP_REDIRECT_URI` (Opcional)
 - **Nome:** `MP_REDIRECT_URI`
-- **Valor:** URL completa do callback OAuth
+- **Valor:** URL completa do callback OAuth (usado como fallback)
 - **Exemplo para produção:** `https://sua-url.vercel.app/oauth/callback`
 - **Exemplo para desenvolvimento:** `http://localhost:3001/oauth/callback`
-- **Importante:** Esta URL deve estar cadastrada nas **Redirect URIs** do seu app no Mercado Pago
+- **Nota:** Este secret é **opcional** - o sistema usa automaticamente a URL do frontend (`window.location.origin/oauth/callback`)
+- **Importante:** A URL usada deve estar cadastrada nas **Redirect URIs** do seu app no Mercado Pago
 
 ### 3. Configure os Secrets para `mp-oauth-callback`
 1. Vá em **Edge Functions** → **mp-oauth-callback**
@@ -51,13 +52,20 @@ Se você está recebendo erro `401 (Unauthorized)` ao tentar conectar ao Mercado
 - Mesmo valor usado em `getMpOauthUrl`
 
 ### 4. Verificar no Mercado Pago
-Certifique-se de que a `MP_REDIRECT_URI` está cadastrada no painel do Mercado Pago:
+Certifique-se de que as URLs de callback estão cadastradas no painel do Mercado Pago:
 1. Acesse https://www.mercadopago.com.br/developers/panel/app
 2. Selecione seu app
 3. Vá em **Credenciais**
-4. Em **Redirect URIs**, adicione:
-   - `https://sua-url.vercel.app/oauth/callback` (produção)
-   - `http://localhost:3001/oauth/callback` (desenvolvimento)
+4. Em **Redirect URIs**, adicione **TODAS** as URLs que você vai usar:
+   - **Produção:** `https://sua-url.vercel.app/oauth/callback` (substitua `sua-url` pela sua URL real do Vercel)
+   - **Desenvolvimento:** `http://localhost:3001/oauth/callback` (ou a porta que você usa localmente)
+   - **Importante:** O sistema detecta automaticamente a URL atual, então adicione todas as variações possíveis
+
+**Como descobrir sua URL do Vercel:**
+- Acesse https://vercel.com/dashboard
+- Selecione seu projeto
+- A URL estará no formato: `https://nome-do-projeto.vercel.app`
+- Adicione `/oauth/callback` no final
 
 ### 5. Testar
 Após configurar os secrets:
