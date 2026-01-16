@@ -3,16 +3,11 @@
 
 // @ts-ignore
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-// @ts-ignore
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
-
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || Deno.env.get("SUPABASE_PROJECT_URL") || "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 
 // Credenciais do app do Mercado Pago (configure como secrets na função)
 const MP_CLIENT_ID = Deno.env.get("MP_CLIENT_ID") || "";
@@ -24,58 +19,17 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Log para debug - verificar todos os headers recebidos
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
-    const apikeyHeader = req.headers.get("apikey") || "";
-    
-    // Log inicial para debug - sempre aparece nos logs
+    // Log inicial para debug
     console.log("🚀 getMpOauthUrl chamada:", {
       method: req.method,
       url: req.url,
       timestamp: new Date().toISOString(),
-      hasAuthHeader: !!authHeader,
-      authHeaderLength: authHeader.length,
-      hasApikey: !!apikeyHeader,
       hasMPClientId: !!MP_CLIENT_ID,
       mpClientIdLength: MP_CLIENT_ID.length,
       hasMPRedirectUri: !!MP_REDIRECT_URI,
-      hasSupabaseUrl: !!SUPABASE_URL,
-      hasSupabaseAnonKey: !!SUPABASE_ANON_KEY,
     });
 
-    // Verificar autenticação (opcional - pode ser removido se a função for pública)
-    // Se não tiver auth header, ainda tentar processar (pode ser chamada sem auth em alguns casos)
-    let isAuthenticated = false;
-    let userId = null;
-
-    if (authHeader) {
-      // Validar token com Supabase se header estiver presente
-      if (SUPABASE_URL && SUPABASE_ANON_KEY) {
-        try {
-          console.log("🔍 Validando token com Supabase...");
-          const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-            global: { headers: { Authorization: authHeader } },
-            auth: { persistSession: false },
-          });
-
-          const { data: userData, error: userError } = await supabase.auth.getUser();
-          if (!userError && userData?.user) {
-            isAuthenticated = true;
-            userId = userData.user.id;
-            console.log("✅ Usuário autenticado:", userId);
-          } else {
-            console.warn("⚠️ Token inválido ou expirado:", userError?.message);
-            // Continuar mesmo com token inválido - a função pode ser chamada sem auth
-          }
-        } catch (authError) {
-          console.warn("⚠️ Erro ao validar token, continuando sem autenticação:", authError);
-          // Continuar mesmo com erro de autenticação
-        }
-      }
-    } else {
-      console.log("ℹ️ Sem header de autenticação - processando sem validação de usuário");
-    }
-
+    // Validar MP_CLIENT_ID (única validação necessária)
     if (!MP_CLIENT_ID) {
       return new Response(
         JSON.stringify({ 
