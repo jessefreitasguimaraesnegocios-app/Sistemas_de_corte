@@ -25,12 +25,20 @@ serve(async (req: Request) => {
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Content-Type": "application/json",
   };
 
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
+
+  // TESTE MÍNIMO - Descomente para testar se a função está sendo chamada
+  // console.log("✅ FUNÇÃO createPayment CHAMADA - TESTE MÍNIMO");
+  // return new Response(
+  //   JSON.stringify({ ok: true, message: "Função funcionando!" }),
+  //   { status: 200, headers: corsHeaders }
+  // );
 
   try {
     // Validar autenticação do usuário
