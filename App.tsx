@@ -4547,19 +4547,17 @@ export default function App() {
     
     const loadBusinesses = async () => {
       // Validar sessão ANTES de buscar businesses
+      // Mas não redirecionar se for apenas estado inicial (usuário não logado)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
       if (sessionError || !session) {
-        console.warn('⚠️ Sem sessão válida ao tentar carregar businesses');
+        // Sem sessão - pode ser estado inicial (normal) ou sessão expirada
+        // Não redirecionar aqui - deixar o onAuthStateChange tratar
+        console.log('ℹ️ Sem sessão ao carregar businesses (pode ser estado inicial)');
         if (isMounted) {
           setLoadingBusinesses(false);
           setBusinesses([]);
-          // Se não estiver na página de login, redirecionar
-          if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
-            setTimeout(() => {
-              window.location.href = '/';
-            }, 500);
-          }
+          // Não redirecionar aqui - o onAuthStateChange vai tratar se necessário
         }
         return;
       }
@@ -4618,6 +4616,16 @@ export default function App() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('🔐 AUTH EVENT:', event, { hasSession: !!session, hasUser: !!user });
       
+      // INITIAL_SESSION sem sessão é normal no primeiro carregamento - não tratar como erro
+      if (event === 'INITIAL_SESSION') {
+        if (!session) {
+          // Estado inicial sem sessão - normal, não fazer nada
+          console.log('ℹ️ Estado inicial sem sessão (normal)');
+          return;
+        }
+        // Se tem sessão no INITIAL_SESSION, processar normalmente abaixo
+      }
+      
       // Refresh automático quando token está prestes a expirar (silencioso)
       if (event === 'TOKEN_REFRESHED' && session) {
         // Token foi renovado com sucesso - continuar normalmente
@@ -4625,8 +4633,9 @@ export default function App() {
         return;
       }
       
-      // Sessão expirada ou logout - REDIRECIONAR PARA LOGIN
-      if (event === 'SIGNED_OUT' || (!session && event !== 'TOKEN_REFRESHED')) {
+      // Sessão expirada ou logout explícito - REDIRECIONAR PARA LOGIN
+      // IMPORTANTE: Não tratar INITIAL_SESSION aqui
+      if (event === 'SIGNED_OUT' || (event === 'USER_UPDATED' && !session)) {
         console.warn('⚠️ Sessão expirada ou logout detectado:', event);
         setUser(null);
         setLoadingBusinesses(false);
@@ -4645,9 +4654,9 @@ export default function App() {
         return;
       }
       
-      // Se não tem sessão mas tinha usuário, pode ser refresh em andamento
+      // Se não tem sessão mas tinha usuário (e não é INITIAL_SESSION), pode ser refresh em andamento
       // Aguardar um pouco antes de considerar como expirado
-      if (!session && user && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED') {
+      if (!session && user && event !== 'SIGNED_OUT' && event !== 'TOKEN_REFRESHED' && event !== 'INITIAL_SESSION') {
         // Aguardar 2 segundos para ver se o refresh acontece
         setTimeout(async () => {
           const { data: { session: checkSession } } = await supabase.auth.getSession();
@@ -4656,7 +4665,7 @@ export default function App() {
             console.warn('⚠️ Sessão não renovada após 2s, redirecionando para login');
             setUser(null);
             setLoadingBusinesses(false);
-            if (window.location.pathname !== '/login') {
+            if (window.location.pathname !== '/login' && !window.location.pathname.includes('/oauth/callback')) {
               window.location.href = '/';
             }
           }
