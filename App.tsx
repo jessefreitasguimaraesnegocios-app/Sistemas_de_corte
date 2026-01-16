@@ -4206,7 +4206,36 @@ export default function App() {
     // Validar sessão ANTES de buscar
     const { data: { session }, error: sessionError } = await supabase.auth.getSession();
     
-    if (sessionError || !session) {
+    if (sessionError) {
+      // Erro ao verificar sessão (pode ser 403, etc)
+      console.warn('⚠️ Erro ao verificar sessão ao buscar businesses:', sessionError);
+      
+      // Se for erro 403, pode ser problema temporário - tentar refresh
+      if (sessionError.message?.includes('403') || sessionError.message?.includes('Forbidden') || sessionError.code === '403') {
+        console.log('🔄 Erro 403 detectado em fetchBusinesses, tentando refresh de sessão...');
+        try {
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (!refreshError && refreshData?.session) {
+            // Sessão renovada, tentar buscar businesses novamente
+            console.log('✅ Sessão renovada após 403, tentando buscar businesses novamente...');
+            // Recursivamente tentar novamente (mas apenas uma vez)
+            if (!fetchingBusinessesRef.current) {
+              fetchingBusinessesRef.current = false; // Reset flag
+              return fetchBusinesses();
+            }
+          }
+        } catch (refreshErr) {
+          console.error('Erro ao refreshar sessão:', refreshErr);
+        }
+      }
+      
+      // Se não conseguir renovar, apenas parar loading
+      setLoadingBusinesses(false);
+      setBusinesses([]);
+      return;
+    }
+    
+    if (!session) {
       console.warn('⚠️ Sem sessão válida ao buscar businesses');
       setLoadingBusinesses(false);
       setBusinesses([]);
@@ -4551,14 +4580,42 @@ export default function App() {
       // Mas não redirecionar se for apenas estado inicial (usuário não logado)
       const { data: { session }, error: sessionError } = await supabase.auth.getSession();
       
-      if (sessionError || !session) {
-        // Sem sessão - pode ser estado inicial (normal) ou sessão expirada
-        // NÃO redirecionar aqui - deixar o onAuthStateChange tratar apenas se necessário
-        // NÃO fazer nada que possa causar recarregamento da página
+      if (sessionError) {
+        // Erro ao verificar sessão (pode ser 403, etc)
+        console.warn('⚠️ Erro ao verificar sessão:', sessionError);
+        
+        // Se for erro 403, pode ser problema temporário - tentar refresh
+        if (sessionError.message?.includes('403') || sessionError.message?.includes('Forbidden')) {
+          console.log('🔄 Erro 403 detectado, tentando refresh de sessão...');
+          try {
+            const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+            if (!refreshError && refreshData?.session) {
+              // Sessão renovada, tentar carregar businesses novamente
+              console.log('✅ Sessão renovada após 403, recarregando businesses...');
+              if (isMounted && !fetchingBusinessesRef.current) {
+                await fetchBusinesses();
+              }
+              return;
+            }
+          } catch (refreshErr) {
+            console.error('Erro ao refreshar sessão:', refreshErr);
+          }
+        }
+        
+        // Se não conseguir renovar, apenas parar loading
         if (isMounted) {
           setLoadingBusinesses(false);
           setBusinesses([]);
-          // Não fazer mais nada - evitar qualquer ação que cause recarregamento
+        }
+        return;
+      }
+      
+      if (!session) {
+        // Sem sessão - pode ser estado inicial (normal) ou sessão expirada
+        // NÃO redirecionar aqui - deixar o onAuthStateChange tratar apenas se necessário
+        if (isMounted) {
+          setLoadingBusinesses(false);
+          setBusinesses([]);
         }
         return;
       }
@@ -4911,15 +4968,30 @@ export default function App() {
             }, 100);
           }
           
-          setUser({
-            id: session.user.id,
-            name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
-            email: session.user.email || '',
-            role: userRole,
-            avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
-            businessId: businessId
-          });
-          
+        const previousUser = user;
+        const previousRole = previousUser?.role;
+        
+        setUser({
+          id: session.user.id,
+          name: session.user.user_metadata.full_name || session.user.email?.split('@')[0] || 'Usuário',
+          email: session.user.email || '',
+          role: userRole,
+          avatar: session.user.user_metadata.avatar_url || session.user.user_metadata.picture,
+          businessId: businessId
+        });
+        
+        // Se for SUPER_ADMIN e acabou de fazer login (SIGNED_IN), recarregar businesses
+        // Isso garante que os parceiros sejam carregados após o login
+        if (userRole === 'SUPER_ADMIN' && (event === 'SIGNED_IN' || (event === 'USER_UPDATED' && previousRole !== 'SUPER_ADMIN'))) {
+          console.log('🔄 SUPER_ADMIN logado, recarregando businesses...');
+          // Aguardar um pouco para garantir que a sessão está totalmente estabelecida
+          setTimeout(() => {
+            if (!fetchingBusinessesRef.current) {
+              fetchBusinesses();
+            }
+          }, 500);
+        }
+        
           // Se for BUSINESS_OWNER, buscar o business completo do banco
           // Mas apenas se não estiver já buscando (evitar múltiplas chamadas)
           if (userRole === 'BUSINESS_OWNER' && session.user.id && !fetchingUserBusinessRef.current && !userBusiness) {
@@ -4984,6 +5056,21 @@ export default function App() {
       };
     }
   }, [user?.id, user?.role, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
+
+  // Recarregar businesses quando SUPER_ADMIN faz login
+  useEffect(() => {
+    if (user && user.role === 'SUPER_ADMIN' && user.id && !loadingBusinesses && businesses.length === 0 && !fetchingBusinessesRef.current) {
+      console.log('🔄 SUPER_ADMIN detectado sem businesses, recarregando...');
+      // Aguardar um pouco para garantir que tudo está pronto
+      const timer = setTimeout(() => {
+        if (!fetchingBusinessesRef.current) {
+          fetchBusinesses();
+        }
+      }, 1000);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [user?.role, businesses.length, loadingBusinesses, fetchBusinesses]);
 
   // Refresh preventivo da sessão (a cada 30 minutos) para evitar expiração
   // O Supabase já faz refresh automático, mas fazemos um preventivo para garantir
