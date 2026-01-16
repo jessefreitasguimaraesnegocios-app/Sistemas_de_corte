@@ -433,11 +433,13 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
       const oauthUrl = data?.url || data?.oauth_url;
       
       if (!oauthUrl) {
+        console.error('❌ URL de OAuth não encontrada na resposta:', data);
         addToast('Erro: URL de OAuth não retornada', 'error');
         return;
       }
 
-      console.log('✅ Redirecionando para URL OAuth:', oauthUrl);
+      console.log('✅ URL OAuth recebida com sucesso!');
+      console.log('✅ Redirecionando para:', oauthUrl);
       
       // Redirecionar para URL de OAuth
       window.location.href = oauthUrl;
