@@ -24,36 +24,54 @@ serve(async (req: Request) => {
   }
 
   try {
-    // Log para debug
+    // Log para debug - verificar todos os headers recebidos
+    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
+    const apikeyHeader = req.headers.get("apikey") || "";
+    
     console.log("getMpOauthUrl chamada:", {
       method: req.method,
-      hasAuthHeader: !!req.headers.get("authorization"),
+      url: req.url,
+      hasAuthHeader: !!authHeader,
+      authHeaderLength: authHeader.length,
+      hasApikey: !!apikeyHeader,
       hasMPClientId: !!MP_CLIENT_ID,
       hasMPRedirectUri: !!MP_REDIRECT_URI,
+      hasSupabaseUrl: !!SUPABASE_URL,
+      hasSupabaseAnonKey: !!SUPABASE_ANON_KEY,
+      allHeaders: Object.fromEntries(req.headers.entries()),
     });
 
     // Verificar autenticação
-    const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     if (!authHeader) {
       console.error("❌ Authorization header ausente");
       return new Response(
-        JSON.stringify({ error: "Authorization header ausente" }),
+        JSON.stringify({ 
+          error: "Authorization header ausente",
+          hint: "Certifique-se de que está autenticado e que o token está sendo enviado"
+        }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
     // Validar token com Supabase
+    // O Supabase injeta automaticamente SUPABASE_URL e SUPABASE_ANON_KEY
+    // Mas vamos verificar se estão disponíveis
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
       console.error("❌ Configuração do Supabase incompleta:", {
         hasUrl: !!SUPABASE_URL,
         hasAnonKey: !!SUPABASE_ANON_KEY,
+        envKeys: Object.keys(Deno.env.toObject()).filter(k => k.includes("SUPABASE")),
       });
       return new Response(
-        JSON.stringify({ error: "Configuração do Supabase incompleta" }),
+        JSON.stringify({ 
+          error: "Configuração do Supabase incompleta",
+          hint: "SUPABASE_URL e SUPABASE_ANON_KEY devem estar disponíveis. Verifique se a função está configurada corretamente."
+        }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
+    console.log("🔍 Validando token com Supabase...");
     const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false },
@@ -61,9 +79,18 @@ serve(async (req: Request) => {
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (userError || !userData?.user) {
-      console.error("❌ Erro ao validar usuário:", userError);
+      console.error("❌ Erro ao validar usuário:", {
+        error: userError,
+        message: userError?.message,
+        status: userError?.status,
+        hasUser: !!userData?.user,
+      });
       return new Response(
-        JSON.stringify({ error: "Usuário inválido ou não autenticado", details: userError?.message }),
+        JSON.stringify({ 
+          error: "Usuário inválido ou não autenticado", 
+          details: userError?.message,
+          hint: "O token pode estar expirado. Tente fazer login novamente."
+        }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
