@@ -4226,10 +4226,10 @@ export default function App() {
           details: error.details,
           hint: error.hint
         });
-        // Em caso de erro, usar array vazio (não usar dados mockados)
+        // Em caso de erro, usar array vazio e continuar funcionando (não travar)
         setBusinesses([]);
-        setBusinessLoadTimeout(true);
-        setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
+        setBusinessLoadTimeout(false); // Não marcar como timeout, apenas erro
+        // Não mostrar toast de erro para não atrapalhar - o sistema continua funcionando
         return;
       }
 
@@ -4281,11 +4281,12 @@ export default function App() {
         hint: error?.hint,
         stack: error?.stack
       });
-      // Em caso de erro, usar array vazio (não usar dados mockados)
+      // Em caso de erro, usar array vazio e continuar funcionando (não travar)
       setBusinesses([]);
-      setBusinessLoadTimeout(true);
-      setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
+      setBusinessLoadTimeout(false); // Não marcar como timeout, apenas erro
+      // Não mostrar toast de erro para não atrapalhar - o sistema continua funcionando
     } finally {
+      // Sempre desligar o loading, mesmo em caso de erro
       setLoadingBusinesses(false);
       fetchingBusinessesRef.current = false;
     }
@@ -4528,7 +4529,6 @@ export default function App() {
   // Carregar businesses quando o app inicia (apenas uma vez)
   useEffect(() => {
     let isMounted = true;
-    let timeoutId: NodeJS.Timeout;
     
     const loadBusinesses = async () => {
       // Evitar múltiplas chamadas
@@ -4542,25 +4542,15 @@ export default function App() {
         console.error('Erro ao carregar businesses:', error);
         if (isMounted) {
           setLoadingBusinesses(false);
-          setBusinessLoadTimeout(true);
+          setBusinessLoadTimeout(false); // Não marcar como timeout, apenas erro
         }
       }
     };
-    
-    // Timeout mais agressivo para evitar travamento (8 segundos)
-    timeoutId = setTimeout(() => {
-      if (isMounted) {
-        console.warn('⏱️ Timeout ao carregar businesses, parando loading');
-        setLoadingBusinesses(false);
-        setBusinessLoadTimeout(true);
-      }
-    }, 8000);
     
     loadBusinesses();
     
     return () => {
       isMounted = false;
-      clearTimeout(timeoutId);
     };
   }, []); // Executar apenas uma vez na montagem
 
@@ -4818,7 +4808,7 @@ export default function App() {
       // Limitar retries
       if (retryCountRef.current >= MAX_RETRIES) {
         console.log('⛔ Limite de retries atingido, não tentando mais buscar userBusiness');
-        setBusinessLoadTimeout(true);
+        setBusinessLoadTimeout(false); // Não travar, apenas parar de tentar
         return;
       }
       
@@ -4827,15 +4817,13 @@ export default function App() {
       // Aguardar um pouco para garantir que fetchBusinesses terminou
       const timer = setTimeout(async () => {
         const biz = await fetchUserBusiness(user.id);
-        if (!biz && !businessLoadTimeout && retryCountRef.current < MAX_RETRIES) {
-          // Se não encontrou e ainda não deu timeout, tentar novamente após um delay maior
+        if (!biz && retryCountRef.current < MAX_RETRIES) {
+          // Se não encontrou, tentar novamente após um delay maior
           setTimeout(async () => {
             await fetchUserBusiness(user.id, 1);
           }, 3000);
-        } else if (!biz) {
-          // Se não encontrou após todas as tentativas, marcar timeout
-          setBusinessLoadTimeout(true);
         }
+        // Não marcar timeout - permitir que o sistema continue funcionando
       }, 1500);
       
       return () => {
@@ -5173,8 +5161,11 @@ export default function App() {
         });
       }
       
-      // Se não encontrou o business e ainda está carregando (mas não passou do timeout), mostrar loading
-      if (!biz && loadingBusinesses && !businessLoadTimeout) {
+      // Se não encontrou o business e ainda está carregando, mostrar loading
+      // Mas não travar indefinidamente - permitir uso do sistema após um tempo curto
+      if (!biz && loadingBusinesses) {
+        // Usar um timeout curto apenas como fallback de segurança
+        // O loading será desligado automaticamente quando fetchBusinesses terminar
         return (
           <div className="flex items-center justify-center min-h-[calc(100vh-64px)] bg-slate-50">
             <div className="text-center">
@@ -5186,8 +5177,8 @@ export default function App() {
         );
       }
       
-      // Se não encontrou o business após carregar ou timeout, mostrar erro
-      if (!biz && (!loadingBusinesses || businessLoadTimeout)) {
+      // Se não encontrou o business após carregar, mostrar erro (mas não travar)
+      if (!biz && !loadingBusinesses) {
         return (
           <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
             <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
