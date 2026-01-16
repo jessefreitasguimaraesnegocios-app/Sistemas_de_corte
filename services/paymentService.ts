@@ -60,11 +60,7 @@ export async function criarPagamentoPix(
     let responseData: any = null;
     let responseError: any = null;
     
-    // Usar fetch direto para garantir que capturamos o body do erro corretamente
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
       // Obter sessão e garantir que o token está válido
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       let accessToken = sessionData?.session?.access_token;
@@ -252,11 +248,7 @@ export async function criarPagamentoCartao(
     let responseData: any = null;
     let responseError: any = null;
     
-    // Usar fetch direto para garantir que capturamos o body do erro corretamente
     try {
-      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-      const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      
       // Obter sessão e garantir que o token está válido
       let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       let accessToken = sessionData?.session?.access_token;
