@@ -4026,6 +4026,11 @@ export default function App() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loadingBusinesses, setLoadingBusinesses] = useState(true);
   const [businessLoadTimeout, setBusinessLoadTimeout] = useState(false);
+  // Flags para evitar loops infinitos e múltiplas chamadas simultâneas
+  const fetchingBusinessesRef = useRef(false);
+  const fetchingUserBusinessRef = useRef(false);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES = 2; // Limitar tentativas
   
   // Cart State Management
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -4141,8 +4146,16 @@ export default function App() {
 
   // Função para buscar businesses do banco de dados
   const fetchBusinesses = useCallback(async () => {
+    // Evitar múltiplas chamadas simultâneas
+    if (fetchingBusinessesRef.current) {
+      console.log('⏸️ fetchBusinesses já em execução, ignorando chamada duplicada');
+      return;
+    }
+    
+    fetchingBusinessesRef.current = true;
     setLoadingBusinesses(true);
     setBusinessLoadTimeout(false);
+    
     try {
       const { data, error } = await supabase
         .from('businesses')
@@ -4218,12 +4231,27 @@ export default function App() {
       setToast({ message: 'Erro ao carregar estabelecimentos. Verifique sua conexão.', type: 'error' });
     } finally {
       setLoadingBusinesses(false);
+      fetchingBusinessesRef.current = false;
     }
-  }, []);
+  }, [user, userBusiness]);
 
   // Função para buscar business do usuário logado com retry e refresh de sessão
   const fetchUserBusiness = useCallback(async (userId: string, retryCount = 0) => {
     if (!userId) return null;
+    
+    // Evitar múltiplas chamadas simultâneas
+    if (fetchingUserBusinessRef.current && retryCount === 0) {
+      console.log('⏸️ fetchUserBusiness já em execução, ignorando chamada duplicada');
+      return null;
+    }
+    
+    // Limitar retries
+    if (retryCount > MAX_RETRIES) {
+      console.log('⛔ Limite de retries atingido para fetchUserBusiness');
+      return null;
+    }
+    
+    fetchingUserBusinessRef.current = true;
     
     try {
       // Verificar e refreshar sessão se necessário
@@ -4311,6 +4339,8 @@ export default function App() {
     } catch (error) {
       console.error('Erro ao buscar business do usuário:', error);
       return null;
+    } finally {
+      fetchingUserBusinessRef.current = false;
     }
   }, []);
 
@@ -4434,11 +4464,17 @@ export default function App() {
     }
   }, []);
 
-  // Carregar businesses quando o app inicia
+  // Carregar businesses quando o app inicia (apenas uma vez)
   useEffect(() => {
     let isMounted = true;
+    let timeoutId: NodeJS.Timeout;
     
     const loadBusinesses = async () => {
+      // Evitar múltiplas chamadas
+      if (fetchingBusinessesRef.current) {
+        return;
+      }
+      
       try {
         await fetchBusinesses();
       } catch (error) {
@@ -4450,21 +4486,22 @@ export default function App() {
       }
     };
     
-    loadBusinesses();
-    
-    // Timeout para evitar travamento infinito
-    const timeout = setTimeout(() => {
+    // Timeout mais agressivo para evitar travamento (8 segundos)
+    timeoutId = setTimeout(() => {
       if (isMounted) {
+        console.warn('⏱️ Timeout ao carregar businesses, parando loading');
         setLoadingBusinesses(false);
         setBusinessLoadTimeout(true);
       }
-    }, 10000); // 10 segundos
+    }, 8000);
+    
+    loadBusinesses();
     
     return () => {
       isMounted = false;
-      clearTimeout(timeout);
+      clearTimeout(timeoutId);
     };
-  }, [fetchBusinesses]);
+  }, []); // Executar apenas uma vez na montagem
 
   useEffect(() => {
     // Verificar se há um parâmetro de role na URL (após redirect do OAuth)
@@ -4716,21 +4753,36 @@ export default function App() {
 
   // Buscar business do usuário quando ele faz login como BUSINESS_OWNER
   useEffect(() => {
-    if (user && user.role === 'BUSINESS_OWNER' && user.id && !userBusiness && !loadingBusinesses) {
+    // Evitar loops: só buscar se realmente necessário e não estiver carregando
+    if (user && user.role === 'BUSINESS_OWNER' && user.id && !userBusiness && !loadingBusinesses && !fetchingUserBusinessRef.current) {
+      // Limitar retries
+      if (retryCountRef.current >= MAX_RETRIES) {
+        console.log('⛔ Limite de retries atingido, não tentando mais buscar userBusiness');
+        setBusinessLoadTimeout(true);
+        return;
+      }
+      
+      retryCountRef.current += 1;
+      
       // Aguardar um pouco para garantir que fetchBusinesses terminou
       const timer = setTimeout(async () => {
         const biz = await fetchUserBusiness(user.id);
-        if (!biz && !businessLoadTimeout) {
-          // Se não encontrou e ainda não deu timeout, tentar novamente após um delay
+        if (!biz && !businessLoadTimeout && retryCountRef.current < MAX_RETRIES) {
+          // Se não encontrou e ainda não deu timeout, tentar novamente após um delay maior
           setTimeout(async () => {
-            await fetchUserBusiness(user.id);
-          }, 2000);
+            await fetchUserBusiness(user.id, 1);
+          }, 3000);
+        } else if (!biz) {
+          // Se não encontrou após todas as tentativas, marcar timeout
+          setBusinessLoadTimeout(true);
         }
-      }, 1000);
+      }, 1500);
       
-      return () => clearTimeout(timer);
+      return () => {
+        clearTimeout(timer);
+      };
     }
-  }, [user, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
+  }, [user?.id, user?.role, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
 
   // Refresh periódico do userBusiness e sessão (a cada 5 minutos) para evitar problemas após tempo aberto
   useEffect(() => {
