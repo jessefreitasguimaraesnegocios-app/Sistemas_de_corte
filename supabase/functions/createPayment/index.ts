@@ -17,6 +17,7 @@ const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || 
                      Deno.env.get("SUPABASE_PROJECT_URL") || 
                      "";
+const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 serve(async (req: Request) => {
@@ -51,10 +52,10 @@ serve(async (req: Request) => {
     const token = authHeader.replace("Bearer ", "");
     
     // Validar credenciais do Supabase antes de criar cliente
-    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
       return new Response(
         JSON.stringify({ 
-          error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY devem estar configuradas." 
+          error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY devem estar configuradas." 
         }),
         { 
           status: 500, 
@@ -63,12 +64,16 @@ serve(async (req: Request) => {
       );
     }
 
-    // Criar cliente Supabase com o token do usuário para validar autenticação
-    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    // Criar cliente Supabase com ANON_KEY para validar o JWT do usuário
+    // O Service Role Key bypassa autenticação, então não pode validar JWT
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       global: {
         headers: {
           Authorization: authHeader,
         },
+      },
+      auth: {
+        persistSession: false,
       },
     });
 
