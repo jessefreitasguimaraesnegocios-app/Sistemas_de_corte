@@ -112,10 +112,24 @@ export async function criarPagamentoPix(
         throw new Error('Não foi possível obter token de autenticação. Por favor, faça login novamente.');
       }
       
-      console.log('🔐 Chamando createPayment (PIX) com token:', {
+      // VALIDAÇÃO CRÍTICA: Garantir que accessToken é uma string
+      if (typeof accessToken !== 'string') {
+        console.error('❌ ERRO CRÍTICO: accessToken não é uma string!', {
+          tipo: typeof accessToken,
+          valor: accessToken,
+          sessionData: sessionData
+        });
+        throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
+      }
+      
+      // Log detalhado do token
+      console.log('🔐 TOKEN VALIDADO:', {
+        tipo: typeof accessToken,
+        isString: typeof accessToken === 'string',
         hasToken: !!accessToken,
         tokenLength: accessToken.length,
-        tokenPreview: accessToken.substring(0, 20) + '...',
+        tokenPreview: accessToken.substring(0, 30) + '...',
+        startsWithEyJ: accessToken.startsWith('eyJ'), // JWT sempre começa com eyJ
         expiresAt: sessionData?.session?.expires_at,
         businessId
       });
@@ -300,10 +314,24 @@ export async function criarPagamentoCartao(
         throw new Error('Não foi possível obter token de autenticação. Por favor, faça login novamente.');
       }
       
-      console.log('🔐 Chamando createPayment (cartão) com token:', {
+      // VALIDAÇÃO CRÍTICA: Garantir que accessToken é uma string
+      if (typeof accessToken !== 'string') {
+        console.error('❌ ERRO CRÍTICO: accessToken não é uma string!', {
+          tipo: typeof accessToken,
+          valor: accessToken,
+          sessionData: sessionData
+        });
+        throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
+      }
+      
+      // Log detalhado do token
+      console.log('🔐 TOKEN VALIDADO (cartão):', {
+        tipo: typeof accessToken,
+        isString: typeof accessToken === 'string',
         hasToken: !!accessToken,
         tokenLength: accessToken.length,
-        tokenPreview: accessToken.substring(0, 20) + '...',
+        tokenPreview: accessToken.substring(0, 30) + '...',
+        startsWithEyJ: accessToken.startsWith('eyJ'), // JWT sempre começa com eyJ
         expiresAt: sessionData?.session?.expires_at,
         businessId
       });
