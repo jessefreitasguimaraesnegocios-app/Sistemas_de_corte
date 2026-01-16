@@ -32,6 +32,65 @@ serve(async (req: Request) => {
   }
 
   try {
+    // Validar autenticação do usuário
+    const authHeader = req.headers.get("Authorization");
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Não autorizado. Token de autenticação não fornecido.",
+          hint: "Esta função requer autenticação. Certifique-se de estar logado."
+        }),
+        { 
+          status: 401, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    // Extrair token do header
+    const token = authHeader.replace("Bearer ", "");
+    
+    // Validar credenciais do Supabase antes de criar cliente
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+      return new Response(
+        JSON.stringify({ 
+          error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY devem estar configuradas." 
+        }),
+        { 
+          status: 500, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    // Criar cliente Supabase com o token do usuário para validar autenticação
+    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+      global: {
+        headers: {
+          Authorization: authHeader,
+        },
+      },
+    });
+
+    // Verificar se o usuário está autenticado
+    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    
+    if (userError || !user) {
+      console.error("Erro ao validar usuário:", userError);
+      return new Response(
+        JSON.stringify({ 
+          error: "Não autorizado. Token inválido ou expirado.",
+          hint: "Faça login novamente ou renove sua sessão."
+        }),
+        { 
+          status: 401, 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
+        }
+      );
+    }
+
+    console.log("✅ Usuário autenticado:", user.id);
+
     const body = await req.json();
     const {
       valor,
@@ -119,7 +178,8 @@ serve(async (req: Request) => {
       );
     }
 
-    // Criar cliente Supabase para buscar dados do negócio
+    // Criar cliente Supabase com Service Role para buscar dados do negócio
+    // (já validamos o usuário acima, agora usamos Service Role para acessar dados)
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
     // Buscar informações do negócio, incluindo o Access Token do Mercado Pago

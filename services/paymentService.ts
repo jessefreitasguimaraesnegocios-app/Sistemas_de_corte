@@ -64,14 +64,39 @@ export async function criarPagamentoPix(
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      
+      // Obter sessão e garantir que o token está válido
+      let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      let accessToken = sessionData?.session?.access_token;
+      
+      // Se não há sessão ou token, tentar refresh
+      if (sessionError || !accessToken) {
+        console.log('⚠️ Sessão inválida ou expirada, tentando refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError || !refreshData?.session?.access_token) {
+          throw new Error('Sessão expirada. Por favor, faça login novamente.');
+        }
+        
+        accessToken = refreshData.session.access_token;
+        console.log('✅ Sessão renovada com sucesso');
+      }
+      
+      if (!accessToken) {
+        throw new Error('Não foi possível obter token de autenticação. Por favor, faça login novamente.');
+      }
+      
+      console.log('🔐 Chamando createPayment (PIX) com token:', {
+        hasToken: !!accessToken,
+        tokenLength: accessToken.length,
+        businessId
+      });
       
       const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
+          'Authorization': `Bearer ${accessToken}`,
           'apikey': supabaseAnonKey,
         },
         body: JSON.stringify({
@@ -206,14 +231,39 @@ export async function criarPagamentoCartao(
     try {
       const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
       const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-      const { data: sessionData } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
+      
+      // Obter sessão e garantir que o token está válido
+      let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      let accessToken = sessionData?.session?.access_token;
+      
+      // Se não há sessão ou token, tentar refresh
+      if (sessionError || !accessToken) {
+        console.log('⚠️ Sessão inválida ou expirada, tentando refresh...');
+        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+        
+        if (refreshError || !refreshData?.session?.access_token) {
+          throw new Error('Sessão expirada. Por favor, faça login novamente.');
+        }
+        
+        accessToken = refreshData.session.access_token;
+        console.log('✅ Sessão renovada com sucesso');
+      }
+      
+      if (!accessToken) {
+        throw new Error('Não foi possível obter token de autenticação. Por favor, faça login novamente.');
+      }
+      
+      console.log('🔐 Chamando createPayment (cartão) com token:', {
+        hasToken: !!accessToken,
+        tokenLength: accessToken.length,
+        businessId
+      });
       
       const response = await fetch(`${supabaseUrl}/functions/v1/createPayment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken || supabaseAnonKey}`,
+          'Authorization': `Bearer ${accessToken}`,
           'apikey': supabaseAnonKey,
         },
         body: JSON.stringify({
