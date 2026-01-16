@@ -382,9 +382,22 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
       const accessToken = sessionData?.session?.access_token;
 
       if (sessionError || !accessToken) {
-        console.error('❌ Sem sessão/Access Token para chamar getMpOauthUrl:', sessionError);
-        addToast('Sessão expirada. Faça login novamente.', 'error');
-        return;
+        // Tentar refresh silencioso antes de mostrar erro
+        try {
+          const { data: refreshData } = await supabase.auth.refreshSession();
+          if (refreshData?.session?.access_token) {
+            // Se conseguiu refreshar, usar o novo token
+            accessToken = refreshData.session.access_token;
+          } else {
+            console.error('❌ Sem sessão/Access Token para chamar getMpOauthUrl:', sessionError);
+            addToast('Sessão expirada. Faça login novamente.', 'error');
+            return;
+          }
+        } catch (refreshError) {
+          console.error('❌ Erro ao refreshar sessão:', refreshError);
+          addToast('Sessão expirada. Faça login novamente.', 'error');
+          return;
+        }
       }
 
       // Construir redirect URI dinamicamente baseado na URL atual
@@ -4254,15 +4267,19 @@ export default function App() {
     fetchingUserBusinessRef.current = true;
     
     try {
-      // Verificar e refreshar sessão se necessário
+      // Verificar sessão (o Supabase já faz refresh automático)
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       
+      // Se não tem sessão, tentar refresh silencioso (sem log de erro)
       if (sessionError || !sessionData?.session) {
-        console.warn('Sessão inválida, tentando refresh...');
+        // Tentar refresh silencioso (sem logar como erro)
         const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
         
         if (refreshError || !refreshData?.session) {
-          console.error('Erro ao refreshar sessão:', refreshError);
+          // Só logar como erro se realmente não conseguir após retry
+          if (retryCount >= MAX_RETRIES) {
+            console.error('Erro ao refreshar sessão após múltiplas tentativas:', refreshError);
+          }
           // Se não conseguir refreshar e for primeira tentativa, tentar novamente
           if (retryCount < 1) {
             await new Promise(resolve => setTimeout(resolve, 1000));
@@ -4270,6 +4287,7 @@ export default function App() {
           }
           return null;
         }
+        // Se conseguiu refreshar, continuar silenciosamente
       }
       
       const { data: businessData, error: businessError } = await supabase
@@ -4508,31 +4526,30 @@ export default function App() {
     const urlParams = new URLSearchParams(window.location.search);
     const roleParam = urlParams.get('role');
     
-    // Listener para mudanças de autenticação com refresh automático
+    // Listener para mudanças de autenticação com refresh automático preventivo
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
-      // Refresh automático quando token está prestes a expirar
+      // Refresh automático quando token está prestes a expirar (silencioso)
       if (event === 'TOKEN_REFRESHED' && session) {
-        console.log('✅ Token refreshed automaticamente');
+        // Não logar - refresh automático silencioso
+        // O Supabase já faz isso automaticamente com autoRefreshToken: true
       }
       
-      // Se sessão expirou, tentar refresh
-      if (event === 'SIGNED_OUT' || (!session && user)) {
-        console.warn('⚠️ Sessão expirada, tentando refresh...');
-        try {
-          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-          if (refreshError || !refreshData?.session) {
-            console.error('Não foi possível refreshar sessão:', refreshError);
-            // Se não conseguir, fazer logout
-            setUser(null);
-            return;
-          }
-          // Se conseguiu refreshar, continuar com a sessão atualizada
-          session = refreshData.session;
-        } catch (error) {
-          console.error('Erro ao tentar refresh de sessão:', error);
+      // Se sessão expirou (SIGNED_OUT), só fazer logout se realmente foi logout manual
+      // Não tentar refresh aqui - o Supabase já faz isso automaticamente
+      if (event === 'SIGNED_OUT') {
+        // Só fazer logout se realmente foi um logout manual
+        // Não tentar refresh - se foi logout manual, não devemos tentar recuperar
+        if (!session) {
           setUser(null);
-          return;
         }
+        return;
+      }
+      
+      // Se não tem sessão mas tinha usuário, pode ser refresh em andamento
+      // Não fazer nada - deixar o Supabase gerenciar
+      if (!session && user && event !== 'SIGNED_OUT') {
+        // Pode ser refresh em andamento, aguardar
+        return;
       }
       
       if (session?.user) {
@@ -4784,17 +4801,35 @@ export default function App() {
     }
   }, [user?.id, user?.role, userBusiness, loadingBusinesses, businessLoadTimeout, fetchUserBusiness]);
 
-  // Refresh periódico do userBusiness e sessão (a cada 5 minutos) para evitar problemas após tempo aberto
+  // Refresh preventivo da sessão (a cada 30 minutos) para evitar expiração
+  // O Supabase já faz refresh automático, mas fazemos um preventivo para garantir
+  useEffect(() => {
+    if (user && user.id) {
+      const refreshInterval = setInterval(async () => {
+        try {
+          // Verificar se sessão ainda é válida
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            // Refresh preventivo silencioso (antes de expirar)
+            // O Supabase já faz isso automaticamente, mas garantimos aqui também
+            await supabase.auth.refreshSession();
+            // Não logar - refresh preventivo silencioso
+          }
+        } catch (error) {
+          // Erro silencioso - não logar como erro crítico
+          // O Supabase já gerencia o refresh automaticamente
+        }
+      }, 30 * 60 * 1000); // 30 minutos (refresh preventivo antes de expirar)
+
+      return () => clearInterval(refreshInterval);
+    }
+  }, [user?.id]);
+
+  // Refresh periódico do userBusiness (a cada 5 minutos) para manter dados atualizados
   useEffect(() => {
     if (user && user.role === 'BUSINESS_OWNER' && user.id && userBusiness) {
       const refreshInterval = setInterval(async () => {
         try {
-          // Refresh da sessão primeiro para evitar token expirado
-          const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData?.session) {
-            await supabase.auth.refreshSession();
-          }
-          
           // Atualizar business para garantir que está sincronizado
           const biz = await fetchUserBusiness(user.id);
           if (biz) {
@@ -4803,17 +4838,8 @@ export default function App() {
             setBusinesses(prev => prev.map(b => b.id === biz.id ? biz : b));
           }
         } catch (error) {
-          console.error('Erro no refresh periódico:', error);
-          // Se der erro, tentar refresh da sessão e buscar novamente
-          try {
-            await supabase.auth.refreshSession();
-            const biz = await fetchUserBusiness(user.id);
-            if (biz) {
-              setUserBusiness(biz);
-            }
-          } catch (retryError) {
-            console.error('Erro no retry do refresh:', retryError);
-          }
+          // Erro silencioso - não interromper o app
+          console.warn('Erro no refresh periódico do business (não crítico):', error);
         }
       }, 5 * 60 * 1000); // 5 minutos
 

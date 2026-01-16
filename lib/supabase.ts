@@ -30,9 +30,19 @@ export const supabase = (() => {
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         storageKey: SUPABASE_STORAGE_KEY,
-        autoRefreshToken: true,
-        persistSession: true,
-        detectSessionInUrl: true
+        autoRefreshToken: true, // Refresh automático quando token está prestes a expirar
+        persistSession: true, // Persistir sessão no localStorage
+        detectSessionInUrl: true,
+        // Configurações para manter sessão ativa
+        flowType: 'pkce' // Usar PKCE para melhor segurança e refresh automático
+      }
+    });
+    
+    // Listener global para refresh automático silencioso
+    supabaseInstance.auth.onAuthStateChange((event, session) => {
+      if (event === 'TOKEN_REFRESHED') {
+        // Refresh silencioso - não precisa logar
+        console.log('🔄 Token refreshed automaticamente (silencioso)');
       }
     });
   }
