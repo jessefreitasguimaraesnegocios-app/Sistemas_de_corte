@@ -24,9 +24,18 @@ serve(async (req: Request) => {
   }
 
   try {
+    // Log para debug
+    console.log("getMpOauthUrl chamada:", {
+      method: req.method,
+      hasAuthHeader: !!req.headers.get("authorization"),
+      hasMPClientId: !!MP_CLIENT_ID,
+      hasMPRedirectUri: !!MP_REDIRECT_URI,
+    });
+
     // Verificar autenticação
     const authHeader = req.headers.get("authorization") || req.headers.get("Authorization") || "";
     if (!authHeader) {
+      console.error("❌ Authorization header ausente");
       return new Response(
         JSON.stringify({ error: "Authorization header ausente" }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -35,6 +44,10 @@ serve(async (req: Request) => {
 
     // Validar token com Supabase
     if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.error("❌ Configuração do Supabase incompleta:", {
+        hasUrl: !!SUPABASE_URL,
+        hasAnonKey: !!SUPABASE_ANON_KEY,
+      });
       return new Response(
         JSON.stringify({ error: "Configuração do Supabase incompleta" }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -48,11 +61,14 @@ serve(async (req: Request) => {
 
     const { data: userData, error: userError } = await supabase.auth.getUser();
     if (userError || !userData?.user) {
+      console.error("❌ Erro ao validar usuário:", userError);
       return new Response(
         JSON.stringify({ error: "Usuário inválido ou não autenticado", details: userError?.message }),
         { status: 401, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
+
+    console.log("✅ Usuário autenticado:", userData.user.id);
 
     if (!MP_CLIENT_ID || !MP_REDIRECT_URI) {
       return new Response(

@@ -387,6 +387,12 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         return;
       }
 
+      console.log('🔐 Chamando getMpOauthUrl com token:', {
+        businessId: business.id,
+        hasToken: !!accessToken,
+        tokenLength: accessToken?.length,
+      });
+
       // Chamar Edge Function para obter URL de OAuth
       const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
         body: { business_id: business.id },
@@ -396,8 +402,22 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
       });
 
       if (error) {
-        console.error('Erro ao obter URL OAuth:', error);
-        addToast('Erro ao conectar ao Mercado Pago. Verifique a configuração.', 'error');
+        console.error('❌ Erro ao obter URL OAuth:', {
+          error,
+          message: error.message,
+          context: error.context,
+          status: error.status,
+        });
+        
+        // Mensagem mais específica baseada no erro
+        let errorMessage = 'Erro ao conectar ao Mercado Pago. Verifique a configuração.';
+        if (error.message?.includes('401') || error.status === 401) {
+          errorMessage = 'Erro de autenticação. Faça login novamente.';
+        } else if (error.message?.includes('MP_CLIENT_ID') || error.message?.includes('MP_REDIRECT_URI')) {
+          errorMessage = 'Configuração do Mercado Pago incompleta. Contate o suporte.';
+        }
+        
+        addToast(errorMessage, 'error');
         return;
       }
 
