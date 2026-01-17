@@ -63,16 +63,22 @@ export async function criarPagamentoPix(
     try {
       // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento
       // ❌ NUNCA usar token salvo em state, context ou localStorage
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       
-      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
-      if (sessionError) {
-        console.error('❌ ERRO ao buscar sessão:', sessionError);
-        throw new Error('Erro ao verificar sessão. Por favor, faça login novamente.');
+      // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
+      // Isso é crítico quando verify_jwt = true no gateway
+      console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError || !refreshData?.session) {
+        console.error('❌ ERRO ao refreshar sessão:', refreshError);
+        throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
       
+      const sessionData = refreshData;
+      
+      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
       if (!sessionData?.session) {
-        console.error('❌ ERRO: Sessão não existe');
+        console.error('❌ ERRO: Sessão não existe após refresh');
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
       }
       
@@ -95,6 +101,9 @@ export async function criarPagamentoPix(
         tokenType: typeof sessionData.session?.access_token,
         tokenLength: sessionData.session?.access_token?.length,
         startsWithEyJ: sessionData.session?.access_token?.startsWith('eyJ'),
+        expiresAt: sessionData.session?.expires_at,
+        now: Math.floor(Date.now() / 1000),
+        timeUntilExpiry: sessionData.session?.expires_at ? sessionData.session.expires_at - Math.floor(Date.now() / 1000) : null,
       });
       
       // ✅ O ÚNICO resultado aceitável:
@@ -252,12 +261,22 @@ export async function criarPagamentoCartao(
     
     try {
       // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento (cartão)
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      
+      // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
+      // Isso é crítico quando verify_jwt = true no gateway
+      console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function (cartão)...');
+      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+      
+      if (refreshError || !refreshData?.session) {
+        console.error('❌ ERRO ao refreshar sessão (cartão):', refreshError);
+        throw new Error('Sessão expirada. Por favor, faça login novamente.');
+      }
+      
+      const sessionData = refreshData;
       
       // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
-      if (sessionError || !sessionData?.session || !sessionData.session.user) {
+      if (!sessionData?.session || !sessionData.session.user) {
         console.error('❌ ERRO: Sessão inválida ou usuário não autenticado (cartão)', {
-          sessionError,
           hasSession: !!sessionData?.session,
           hasUser: !!sessionData?.session?.user,
         });
@@ -270,6 +289,9 @@ export async function criarPagamentoCartao(
         hasUser: !!sessionData.session?.user,
         userId: sessionData.session?.user?.id,
         tokenPreview: sessionData.session?.access_token?.slice(0, 25),
+        expiresAt: sessionData.session?.expires_at,
+        now: Math.floor(Date.now() / 1000),
+        timeUntilExpiry: sessionData.session?.expires_at ? sessionData.session.expires_at - Math.floor(Date.now() / 1000) : null,
       });
       
       const accessToken = sessionData.session.access_token;
