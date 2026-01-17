@@ -1,13 +1,6 @@
 import { supabase } from '../lib/supabase';
 import { PaymentRequest, PixPaymentResponse, CreditCardPaymentResponse } from '../types';
 
-// Obter URL e anon key do Supabase
-const getSupabaseConfig = () => {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
-  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  return { supabaseUrl, supabaseAnonKey };
-};
-
 /**
  * Verifica o status de um pagamento PIX
  * @param paymentId ID do pagamento retornado pelo Mercado Pago
@@ -119,12 +112,6 @@ export async function criarPagamentoPix(
           tokenType: typeof accessToken,
         });
         throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
-      }
-      
-      // Obter configuração do Supabase
-      const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
-      if (!supabaseUrl || !supabaseAnonKey) {
-        throw new Error('Configuração do Supabase não encontrada.');
       }
       
       console.log('✅ Validação completa - Pronto para chamar Edge Function', {
