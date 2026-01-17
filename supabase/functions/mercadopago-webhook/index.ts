@@ -287,6 +287,11 @@ serve(async (req: Request) => {
         console.log(`✅ Ambiente correto: Payment ${paymentLiveMode ? "PRODUÇÃO" : "TESTE"} com token ${businessLiveMode ? "PRODUÇÃO" : "TESTE"}`);
       }
 
+      // Definir variáveis para uso nos logs e verificações
+      const liveMode = paymentLiveMode;
+      const isProductionToken = accessToken?.startsWith("APP_USR-");
+      const isTestToken = accessToken?.startsWith("TEST-");
+
       console.log(`📊 Payment Data:`, {
         payment_id: resourceId,
         status: status,

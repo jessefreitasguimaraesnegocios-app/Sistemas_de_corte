@@ -1,0 +1,3 @@
+# Config da Edge Function createPayment
+# OBRIGATÓRIO: checkout público não valida JWT de usuário
+verify_jwt = false

@@ -57,182 +57,75 @@ export async function criarPagamentoPix(
       throw new Error('Valor inválido. O valor deve ser maior que zero.');
     }
 
+    // 🔥 FUNÇÃO PÚBLICA - NÃO REQUER AUTENTICAÇÃO DE USUÁRIO
+    // ✅ Checkout pode ser feito por cliente anônimo (PIX público, link, mesa, PWA)
+    // 🔐 Segurança real vem do webhook assinado e OAuth do Mercado Pago
+    
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const functionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+    
+    console.log('📤 Chamando createPayment Edge Function (PIX) - função pública...', {
+      url: functionUrl,
+      businessId,
+      valor,
+    });
+    
+    const requestBody = {
+      valor,
+      metodo_pagamento: 'pix',
+      email_cliente: email,
+      business_id: businessId,
+      referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    };
+    
     let responseData: any = null;
     let responseError: any = null;
     
     try {
-      // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento
-      // ❌ NUNCA usar token salvo em state, context ou localStorage
-      
-      // ✅ 1️⃣ VALIDAÇÃO CRÍTICA: Verificar se usuário está carregado ANTES de tudo
-      // Isso evita chamar quando INITIAL_SESSION ainda não carregou o usuário
-      console.log('🔐 Validando usuário antes de processar pagamento...');
-      const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
-      
-      if (getUserError || !currentUser) {
-        console.error('❌ ERRO CRÍTICO: Usuário não carregado - hasUser: false', {
-          hasUser: !!currentUser,
-          getUserError: getUserError?.message,
-          getUserErrorName: getUserError?.name
-        });
-        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
-      }
-      
-      console.log('✅ Usuário confirmado antes de processar:', { userId: currentUser.id });
-      
-      // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
-      // Isso é crítico quando verify_jwt = true no gateway
-      console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function...');
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-      
-      if (refreshError || !refreshData?.session) {
-        console.error('❌ ERRO ao refreshar sessão:', refreshError);
-        throw new Error('Sessão expirada. Por favor, faça login novamente.');
-      }
-      
-      // ⚠️ CRÍTICO: refreshSession() pode disparar TOKEN_REFRESHED com hasUser: false temporariamente
-      // Precisamos aguardar o evento estabilizar e garantir que o usuário está carregado
-      console.log('⏳ Aguardando estabilização da sessão após refresh...');
-      
-      // Aguardar um pouco para o evento TOKEN_REFRESHED completar
-      // O evento TOKEN_REFRESHED pode ter hasUser: false temporariamente
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Validar novamente após refresh (garantir que usuário está carregado)
-      const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
-      
-      if (getUserAfterRefreshError || !userAfterRefresh) {
-        console.error('❌ ERRO: Usuário não carregado após refresh', {
-          hasUser: !!userAfterRefresh,
-          error: getUserAfterRefreshError?.message
-        });
-        throw new Error('Usuário não autenticado após refresh. Por favor, faça login novamente.');
-      }
-      
-      console.log('✅ Usuário confirmado após refresh:', { userId: userAfterRefresh.id });
-      
-      const sessionData = refreshData;
-      
-      // 🔹 2️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário após refresh
-      if (!sessionData?.session) {
-        console.error('❌ ERRO: Sessão não existe após refresh');
-        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
-      }
-      
-      // ⚠️ VALIDAÇÃO CRÍTICA: Se hasUser: false → 401 garantido
-      if (!sessionData.session.user) {
-        console.error('❌ ERRO CRÍTICO: hasUser: false após refresh - Sessão existe mas usuário não!', {
-          hasSession: !!sessionData.session,
-          hasUser: !!sessionData.session.user,
-          session: sessionData.session
-        });
-        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
-      }
-      
-      // 🔥 LOG DE DEBUG (obrigatório)
-      console.log('🔐 AUTH CHECK (antes de chamar PIX):', {
-        hasSession: !!sessionData.session,
-        hasUser: !!sessionData.session?.user,
-        userId: sessionData.session?.user?.id,
-        tokenPreview: sessionData.session?.access_token?.slice(0, 25),
-        tokenType: typeof sessionData.session?.access_token,
-        tokenLength: sessionData.session?.access_token?.length,
-        startsWithEyJ: sessionData.session?.access_token?.startsWith('eyJ'),
-        expiresAt: sessionData.session?.expires_at,
-        now: Math.floor(Date.now() / 1000),
-        timeUntilExpiry: sessionData.session?.expires_at ? sessionData.session.expires_at - Math.floor(Date.now() / 1000) : null,
-      });
-      
-      // ✅ O ÚNICO resultado aceitável:
-      // hasSession: true
-      // hasUser: true
-      // tokenPreview: eyJhbGciOiJIUzI1NiIs...
-      
-      // Se hasUser: false → NÃO CHAMAR O PIX (já lançamos erro acima)
-      
-      const accessToken = sessionData.session.access_token;
-      
-      if (!accessToken || typeof accessToken !== 'string') {
-        console.error('❌ ERRO: Token inválido ou não é string', {
-          hasToken: !!accessToken,
-          tokenType: typeof accessToken,
-        });
-        throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
-      }
-      
-      console.log('✅ Validação completa - Pronto para chamar Edge Function', {
-        hasToken: !!accessToken,
-        tokenType: typeof accessToken,
-        tokenLength: accessToken.length,
-        tokenPreview: accessToken.substring(0, 25) + '...',
-      });
-      
-      // ✅ SOLUÇÃO: Usar supabase.functions.invoke com header explícito
-      // Quando verify_jwt = false, precisamos enviar o header manualmente
-      console.log('📤 Chamando createPayment Edge Function (PIX) via supabase.functions.invoke...');
-      
-      // ✅ OBTER TOKEN FINAL ANTES DE CHAMAR
-      const { data: { session: finalSession } } = await supabase.auth.getSession();
-      console.log('🔐 Token final antes de invoke:', {
-        hasSession: !!finalSession,
-        hasUser: !!finalSession?.user,
-        tokenPreview: finalSession?.access_token?.substring(0, 30) + '...',
-        expiresAt: finalSession?.expires_at,
-        now: Math.floor(Date.now() / 1000),
-        timeUntilExpiry: finalSession?.expires_at ? finalSession.expires_at - Math.floor(Date.now() / 1000) : null,
-      });
-      
-      if (!finalSession?.access_token) {
-        throw new Error('Token de autenticação não encontrado. Faça login novamente.');
-      }
-      
-      // ✅ ENVIAR HEADER AUTHORIZATION EXPLICITAMENTE (necessário quando verify_jwt = false)
-      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
-        body: {
-          valor,
-          metodo_pagamento: 'pix',
-          email_cliente: email,
-          business_id: businessId,
-          referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
+      // ✅ FAZER FETCH DIRETO - SEM HEADER DE AUTENTICAÇÃO (função é pública)
+      const response = await fetch(functionUrl, {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${finalSession.access_token}`,
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
         },
+        body: JSON.stringify(requestBody),
       });
       
       // Processar resposta
-      if (invokeError) {
-        responseError = invokeError;
-        
-        // Tentar extrair detalhes do erro do context
-        let errorDetails = invokeError.message || 'Erro ao criar pagamento';
-        if (invokeError.context?.body) {
-          try {
-            const errorBody = typeof invokeError.context.body === 'string' 
-              ? JSON.parse(invokeError.context.body) 
-              : invokeError.context.body;
-            if (errorBody.error) errorDetails = errorBody.error;
-            if (errorBody.details) errorDetails += ` - ${errorBody.details}`;
-          } catch (e) {
-            // Ignorar erro de parse
-          }
-        }
+      const responseText = await response.text();
+      let responseJson: any;
+      
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch (e) {
+        console.error('❌ Erro ao parsear resposta JSON:', responseText);
+        throw new Error(`Erro ao processar resposta do servidor: ${responseText.substring(0, 200)}`);
+      }
+      
+      if (!response.ok) {
+        responseError = {
+          message: responseJson.error || `HTTP ${response.status}: ${response.statusText}`,
+          status: response.status,
+          context: { body: responseJson }
+        };
         
         responseData = {
-          error: errorDetails,
-          code: invokeError.status || 401,
-          message: errorDetails
+          error: responseJson.error || 'Erro ao criar pagamento',
+          details: responseJson.details,
+          hint: responseJson.hint,
+          code: response.status,
+          message: responseJson.error || response.statusText
         };
         
         console.error('❌ Erro ao chamar createPayment:', {
-          error: invokeError,
-          message: invokeError.message,
-          status: invokeError.status,
-          context: invokeError.context,
-          errorDetails
+          status: response.status,
+          statusText: response.statusText,
+          error: responseJson,
         });
       } else {
-        responseData = invokeData;
+        responseData = responseJson;
       }
     } catch (fetchError: any) {
       console.error('❌ Erro ao chamar Edge Function:', fetchError);
@@ -327,128 +220,76 @@ export async function criarPagamentoCartao(
       throw new Error('Token do cartão é obrigatório');
     }
 
+    // 🔥 FUNÇÃO PÚBLICA - NÃO REQUER AUTENTICAÇÃO DE USUÁRIO
+    // ✅ Checkout pode ser feito por cliente anônimo (checkout transparente)
+    // 🔐 Segurança real vem do webhook assinado e OAuth do Mercado Pago
+    
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+    const functionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+    
+    console.log('📤 Chamando createPayment Edge Function (Cartão) - função pública...', {
+      url: functionUrl,
+      businessId,
+      valor,
+    });
+    
+    const requestBody = {
+      valor,
+      metodo_pagamento: 'credit_card',
+      email_cliente: email,
+      token_cartao: tokenCartao,
+      business_id: businessId,
+      referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    };
+    
     let responseData: any = null;
     let responseError: any = null;
     
     try {
-      // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento (cartão)
-      
-      // ✅ 1️⃣ VALIDAÇÃO CRÍTICA: Verificar se usuário está carregado ANTES de tudo
-      // Isso evita chamar quando INITIAL_SESSION ainda não carregou o usuário
-      console.log('🔐 Validando usuário antes de processar pagamento (cartão)...');
-      const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
-      
-      if (getUserError || !currentUser) {
-        console.error('❌ ERRO CRÍTICO: Usuário não carregado - hasUser: false (cartão)', {
-          hasUser: !!currentUser,
-          getUserError: getUserError?.message,
-          getUserErrorName: getUserError?.name
-        });
-        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
-      }
-      
-      console.log('✅ Usuário confirmado antes de processar (cartão):', { userId: currentUser.id });
-      
-      // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
-      // Isso é crítico quando verify_jwt = true no gateway
-      console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function (cartão)...');
-      const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-      
-      if (refreshError || !refreshData?.session) {
-        console.error('❌ ERRO ao refreshar sessão (cartão):', refreshError);
-        throw new Error('Sessão expirada. Por favor, faça login novamente.');
-      }
-      
-      // ⚠️ CRÍTICO: refreshSession() pode disparar TOKEN_REFRESHED com hasUser: false temporariamente
-      // Precisamos aguardar o evento estabilizar e garantir que o usuário está carregado
-      console.log('⏳ Aguardando estabilização da sessão após refresh (cartão)...');
-      
-      // Aguardar um pouco para o evento TOKEN_REFRESHED completar
-      // O evento TOKEN_REFRESHED pode ter hasUser: false temporariamente
-      await new Promise(resolve => setTimeout(resolve, 300));
-      
-      // Validar novamente após refresh (garantir que usuário está carregado)
-      const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
-      
-      if (getUserAfterRefreshError || !userAfterRefresh) {
-        console.error('❌ ERRO: Usuário não carregado após refresh (cartão)', {
-          hasUser: !!userAfterRefresh,
-          error: getUserAfterRefreshError?.message
-        });
-        throw new Error('Usuário não autenticado após refresh. Por favor, faça login novamente.');
-      }
-      
-      console.log('✅ Usuário confirmado após refresh (cartão):', { userId: userAfterRefresh.id });
-      
-      const sessionData = refreshData;
-      
-      // 🔹 2️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário após refresh
-      if (!sessionData?.session || !sessionData.session.user) {
-        console.error('❌ ERRO: Sessão inválida ou usuário não autenticado (cartão)', {
-          hasSession: !!sessionData?.session,
-          hasUser: !!sessionData?.session?.user,
-        });
-        throw new Error('Sessão inválida. Por favor, faça login novamente.');
-      }
-      
-      // 🔥 LOG DE DEBUG (obrigatório)
-      console.log('🔐 AUTH CHECK (antes de chamar cartão):', {
-        hasSession: !!sessionData.session,
-        hasUser: !!sessionData.session?.user,
-        userId: sessionData.session?.user?.id,
-        tokenPreview: sessionData.session?.access_token?.slice(0, 25),
-        expiresAt: sessionData.session?.expires_at,
-        now: Math.floor(Date.now() / 1000),
-        timeUntilExpiry: sessionData.session?.expires_at ? sessionData.session.expires_at - Math.floor(Date.now() / 1000) : null,
-      });
-      
-      const accessToken = sessionData.session.access_token;
-      
-      if (!accessToken || typeof accessToken !== 'string') {
-        throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
-      }
-      
-      // ✅ SOLUÇÃO: Usar supabase.functions.invoke com header explícito
-      // Quando verify_jwt = false, precisamos enviar o header manualmente
-      console.log('📤 Chamando createPayment Edge Function (Cartão) via supabase.functions.invoke...');
-      
-      // ✅ OBTER TOKEN FINAL ANTES DE CHAMAR
-      const { data: { session: finalSessionCartao } } = await supabase.auth.getSession();
-      
-      if (!finalSessionCartao?.access_token) {
-        throw new Error('Token de autenticação não encontrado. Faça login novamente.');
-      }
-      
-      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
-        body: {
-          valor,
-          metodo_pagamento: 'credit_card',
-          email_cliente: email,
-          token_cartao: tokenCartao,
-          business_id: businessId,
-          referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
+      // ✅ FAZER FETCH DIRETO - SEM HEADER DE AUTENTICAÇÃO (função é pública)
+      const response = await fetch(functionUrl, {
+        method: 'POST',
         headers: {
-          Authorization: `Bearer ${finalSessionCartao.access_token}`,
+          'Content-Type': 'application/json',
+          'apikey': supabaseAnonKey,
         },
+        body: JSON.stringify(requestBody),
       });
       
-      // Processar resposta do invoke
-      if (invokeError) {
-        responseError = invokeError;
-        responseData = {
-          error: invokeError.message || 'Erro ao criar pagamento',
-          code: invokeError.status || 401,
-          message: invokeError.message || 'Invalid JWT'
+      // Processar resposta
+      const responseText = await response.text();
+      let responseJson: any;
+      
+      try {
+        responseJson = JSON.parse(responseText);
+      } catch (e) {
+        console.error('❌ Erro ao parsear resposta JSON:', responseText);
+        throw new Error(`Erro ao processar resposta do servidor: ${responseText.substring(0, 200)}`);
+      }
+      
+      if (!response.ok) {
+        responseError = {
+          message: responseJson.error || `HTTP ${response.status}: ${response.statusText}`,
+          status: response.status,
+          context: { body: responseJson }
         };
+        
+        responseData = {
+          error: responseJson.error || 'Erro ao criar pagamento',
+          details: responseJson.details,
+          hint: responseJson.hint,
+          code: response.status,
+          message: responseJson.error || response.statusText
+        };
+        
         console.error('❌ Erro ao chamar createPayment:', {
-          error: invokeError,
-          message: invokeError.message,
-          status: invokeError.status,
-          context: invokeError.context
+          status: response.status,
+          statusText: response.statusText,
+          error: responseJson,
         });
       } else {
-        responseData = invokeData;
+        responseData = responseJson;
       }
     } catch (fetchError: any) {
       console.error('❌ Erro ao fazer fetch para Edge Function:', fetchError);

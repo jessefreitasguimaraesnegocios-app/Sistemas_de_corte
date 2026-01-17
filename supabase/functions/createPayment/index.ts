@@ -10,10 +10,10 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 
 // Configurações do Supabase
+// ✅ Usamos apenas SERVICE_ROLE_KEY para acessar o banco (não precisa de ANON_KEY)
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || 
                      Deno.env.get("SUPABASE_PROJECT_URL") || 
                      "";
-const SUPABASE_ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 serve(async (req: Request) => {
@@ -30,57 +30,33 @@ serve(async (req: Request) => {
   }
 
   try {
-    // ✅ LOG NO TOPO - Verificar se função está sendo chamada
-    console.log("✅ FUNÇÃO createPayment CHAMADA");
+    // 🔥 FUNÇÃO PÚBLICA - CHECKOUT NÃO REQUER AUTENTICAÇÃO DE USUÁRIO
+    // ✅ REGRA DE OURO: Pagamento pode ser feito por cliente anônimo
+    // - PIX pode ser gerado sem login (QR Code público, link, mesa, PWA)
+    // - Cartão pode ser processado sem login (checkout transparente)
+    // 
+    // 🔐 SEGURANÇA REAL acontece em:
+    // 1. OAuth Mercado Pago (access_token do vendedor é validado)
+    // 2. Webhook assinado (MP_WEBHOOK_SECRET valida notificações)
+    // 3. Validação de valores no backend (não no frontend)
+    // 4. Idempotency key (evita duplicação)
+    // 
+    // ❌ NUNCA validar usuário logado em checkout/pagamento
+    
+    console.log("🔥 createPayment chamada (pública - sem auth de usuário)");
     console.log("📋 Método:", req.method);
     console.log("📋 URL:", req.url);
-    
-    // ✅ LOG TODOS OS HEADERS (debug completo)
-    const allHeaders: Record<string, string> = {};
-    req.headers.forEach((value, key) => {
-      allHeaders[key] = key.toLowerCase().includes('authorization') 
-        ? `${value.substring(0, 30)}...` 
-        : value;
-    });
-    console.log("📋 TODOS OS HEADERS recebidos:", allHeaders);
-    
-    // ✅ OBTER HEADER AUTHORIZATION
-    const authHeader = req.headers.get("authorization") || 
-                      req.headers.get("Authorization") || 
-                      "";
-    
-    console.log("🔐 Authorization header:", {
-      exists: !!authHeader,
-      length: authHeader.length,
-      preview: authHeader ? `${authHeader.substring(0, 30)}...` : "null",
-      startsWithBearer: authHeader.startsWith("Bearer "),
-    });
-    
-    // ✅ VALIDAR SE HEADER EXISTE
-    if (!authHeader || !authHeader.startsWith("Bearer ")) {
-      console.error("❌ Authorization header ausente ou inválido");
-      return new Response(
-        JSON.stringify({ 
-          error: "Não autorizado. Token de autenticação não fornecido.",
-          hint: "Esta função requer autenticação. Certifique-se de estar logado."
-        }),
-        { 
-          status: 401, 
-          headers: corsHeaders 
-        }
-      );
-    }
 
     // ✅ VALIDAR CONFIGURAÇÕES DO SUPABASE
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+    if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       console.error("❌ Configuração do Supabase incompleta", {
         hasUrl: !!SUPABASE_URL,
-        hasAnonKey: !!SUPABASE_ANON_KEY,
+        hasServiceKey: !!SUPABASE_SERVICE_ROLE_KEY,
       });
       return new Response(
         JSON.stringify({ 
           error: "Configuração do servidor incompleta. Contate o suporte.",
-          details: "SUPABASE_URL ou SUPABASE_ANON_KEY não configurados"
+          details: "SUPABASE_URL ou SUPABASE_SERVICE_ROLE_KEY não configurados"
         }),
         { 
           status: 500, 
@@ -88,54 +64,6 @@ serve(async (req: Request) => {
         }
       );
     }
-
-    // ✅ CRIAR CLIENT SUPABASE COM ANON_KEY E REPASSAR AUTHORIZATION
-    const supabaseClient = createClient(
-      SUPABASE_URL,
-      SUPABASE_ANON_KEY,
-      {
-        global: {
-          headers: {
-            Authorization: authHeader,
-          },
-        },
-        auth: {
-          persistSession: false,
-        },
-      }
-    );
-
-    // ✅ VALIDAR USUÁRIO
-    console.log("🔐 Validando usuário...");
-    const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
-    
-    console.log("👤 Resultado getUser():", {
-      hasUser: !!user,
-      userId: user?.id,
-      userEmail: user?.email,
-      error: userError ? {
-        message: userError.message,
-        name: userError.name,
-        status: userError.status,
-      } : null,
-    });
-    
-    if (userError || !user) {
-      console.error("❌ Erro ao validar usuário:", userError);
-      return new Response(
-        JSON.stringify({ 
-          error: "Não autorizado. Token inválido ou expirado.",
-          hint: "Faça login novamente.",
-          details: userError?.message || "Token não pôde ser validado"
-        }),
-        { 
-          status: 401, 
-          headers: corsHeaders 
-        }
-      );
-    }
-
-    console.log("✅ Usuário autenticado:", user.id);
 
     // ✅ LER BODY DA REQUISIÇÃO
     const body = await req.json();
