@@ -68,17 +68,24 @@ export async function criarPagamentoPix(
     let responseError: any = null;
     
     try {
-      // Obter sessão e garantir que o token está válido
-      let { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento
+      // ❌ NUNCA usar token salvo em state, context ou localStorage
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       
-      // VALIDAÇÃO CRÍTICA: Verificar se sessão E usuário existem
+      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
+      if (sessionError) {
+        console.error('❌ ERRO ao buscar sessão:', sessionError);
+        throw new Error('Erro ao verificar sessão. Por favor, faça login novamente.');
+      }
+      
       if (!sessionData?.session) {
         console.error('❌ ERRO: Sessão não existe');
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
       }
       
+      // ⚠️ VALIDAÇÃO CRÍTICA: Se hasUser: false → 401 garantido
       if (!sessionData.session.user) {
-        console.error('❌ ERRO CRÍTICO: Sessão existe mas usuário não!', {
+        console.error('❌ ERRO CRÍTICO: hasUser: false - Sessão existe mas usuário não!', {
           hasSession: !!sessionData.session,
           hasUser: !!sessionData.session.user,
           session: sessionData.session
@@ -86,88 +93,33 @@ export async function criarPagamentoPix(
         throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
       }
       
-      let accessToken = sessionData.session.access_token;
+      // 🔥 LOG DE DEBUG (obrigatório)
+      console.log('🔐 AUTH CHECK (antes de chamar PIX):', {
+        hasSession: !!sessionData.session,
+        hasUser: !!sessionData.session?.user,
+        userId: sessionData.session?.user?.id,
+        tokenPreview: sessionData.session?.access_token?.slice(0, 25),
+        tokenType: typeof sessionData.session?.access_token,
+        tokenLength: sessionData.session?.access_token?.length,
+        startsWithEyJ: sessionData.session?.access_token?.startsWith('eyJ'),
+      });
       
-      // Verificar se o token está expirado
-      if (sessionData?.session?.expires_at) {
-        const expiresAt = sessionData.session.expires_at;
-        const now = Math.floor(Date.now() / 1000);
-        const timeUntilExpiry = expiresAt - now;
-        
-        console.log('⏰ Verificando expiração do token:', {
-          expiresAt,
-          now,
-          timeUntilExpiry,
-          isExpired: expiresAt <= now,
-          expiresInSeconds: timeUntilExpiry
-        });
-        
-        // Se expira em menos de 60 segundos ou já expirou, fazer refresh
-        if (timeUntilExpiry < 60) {
-          console.log('⚠️ Token expirando em breve ou expirado, fazendo refresh...');
-          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-          
-          if (refreshError || !refreshData?.session?.access_token) {
-            console.error('❌ Erro ao refreshar sessão:', refreshError);
-            throw new Error('Sessão expirada. Por favor, faça login novamente.');
-          }
-          
-          accessToken = refreshData.session.access_token;
-          console.log('✅ Sessão renovada com sucesso');
-        }
-      }
+      // ✅ O ÚNICO resultado aceitável:
+      // hasSession: true
+      // hasUser: true
+      // tokenPreview: eyJhbGciOiJIUzI1NiIs...
       
-      // Se não há sessão ou token, tentar refresh
-      if (sessionError || !accessToken) {
-        console.log('⚠️ Sessão inválida ou expirada, tentando refresh...');
-        const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
-        
-        if (refreshError || !refreshData?.session?.access_token) {
-          console.error('❌ Erro ao refreshar sessão:', refreshError);
-          throw new Error('Sessão expirada. Por favor, faça login novamente.');
-        }
-        
-        accessToken = refreshData.session.access_token;
-        console.log('✅ Sessão renovada com sucesso');
-      }
+      // Se hasUser: false → NÃO CHAMAR O PIX (já lançamos erro acima)
       
-      if (!accessToken) {
-        throw new Error('Não foi possível obter token de autenticação. Por favor, faça login novamente.');
-      }
+      const accessToken = sessionData.session.access_token;
       
-      // VALIDAÇÃO CRÍTICA: Garantir que accessToken é uma string
-      if (typeof accessToken !== 'string') {
-        console.error('❌ ERRO CRÍTICO: accessToken não é uma string!', {
-          tipo: typeof accessToken,
-          valor: accessToken,
-          sessionData: sessionData
+      if (!accessToken || typeof accessToken !== 'string') {
+        console.error('❌ ERRO: Token inválido ou não é string', {
+          hasToken: !!accessToken,
+          tokenType: typeof accessToken,
         });
         throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
       }
-      
-      // Log detalhado do token e sessão
-      console.log('🔐 VALIDAÇÃO COMPLETA:', {
-        hasSession: !!sessionData?.session,
-        hasUser: !!sessionData?.session?.user,
-        userId: sessionData?.session?.user?.id,
-        tokenType: typeof accessToken,
-        isString: typeof accessToken === 'string',
-        hasToken: !!accessToken,
-        tokenLength: accessToken?.length,
-        tokenPreview: accessToken?.substring(0, 30) + '...',
-        startsWithEyJ: accessToken?.startsWith('eyJ'), // JWT sempre começa com eyJ
-        expiresAt: sessionData?.session?.expires_at,
-        businessId
-      });
-      
-      // Garantir que a sessão está ativa no Supabase client antes de chamar
-      const currentSession = await supabase.auth.getSession();
-      if (!currentSession.data?.session || !currentSession.data.session.access_token) {
-        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
-      }
-      
-      // Obter o token mais recente da sessão
-      const latestToken = currentSession.data.session.access_token;
       
       // Obter configuração do Supabase
       const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
@@ -175,24 +127,24 @@ export async function criarPagamentoPix(
         throw new Error('Configuração do Supabase não encontrada.');
       }
       
-      console.log('✅ Sessão confirmada antes de chamar Edge Function', {
-        hasToken: !!latestToken,
-        tokenType: typeof latestToken,
-        tokenLength: latestToken?.length,
-        tokenPreview: latestToken?.substring(0, 30) + '...',
-        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
-        hasAnonKey: !!supabaseAnonKey
+      console.log('✅ Validação completa - Pronto para chamar Edge Function', {
+        hasToken: !!accessToken,
+        tokenType: typeof accessToken,
+        tokenLength: accessToken.length,
+        tokenPreview: accessToken.substring(0, 25) + '...',
       });
       
+      // 🔹 2️⃣ Chamada correta da Edge Function
       // Usar fetch direto para garantir que os headers são enviados corretamente
-      // O supabase.functions.invoke pode não estar enviando o Authorization corretamente
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+      
+      console.log('📤 Chamando createPayment Edge Function (PIX)...');
       
       const fetchResponse = await fetch(edgeFunctionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${latestToken}`,
+          'Authorization': `Bearer ${accessToken}`, // Token obtido NA HORA, validado acima
           'apikey': supabaseAnonKey,
         },
         body: JSON.stringify({
@@ -419,14 +371,32 @@ export async function criarPagamentoCartao(
         businessId
       });
       
-      // Garantir que a sessão está ativa no Supabase client antes de chamar
-      const currentSession = await supabase.auth.getSession();
-      if (!currentSession.data?.session || !currentSession.data.session.access_token) {
-        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
+      // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento (cartão)
+      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+      
+      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
+      if (sessionError || !sessionData?.session || !sessionData.session.user) {
+        console.error('❌ ERRO: Sessão inválida ou usuário não autenticado (cartão)', {
+          sessionError,
+          hasSession: !!sessionData?.session,
+          hasUser: !!sessionData?.session?.user,
+        });
+        throw new Error('Sessão inválida. Por favor, faça login novamente.');
       }
       
-      // Obter o token mais recente da sessão
-      const latestToken = currentSession.data.session.access_token;
+      // 🔥 LOG DE DEBUG (obrigatório)
+      console.log('🔐 AUTH CHECK (antes de chamar cartão):', {
+        hasSession: !!sessionData.session,
+        hasUser: !!sessionData.session?.user,
+        userId: sessionData.session?.user?.id,
+        tokenPreview: sessionData.session?.access_token?.slice(0, 25),
+      });
+      
+      const accessToken = sessionData.session.access_token;
+      
+      if (!accessToken || typeof accessToken !== 'string') {
+        throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
+      }
       
       // Obter configuração do Supabase
       const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
@@ -434,23 +404,16 @@ export async function criarPagamentoCartao(
         throw new Error('Configuração do Supabase não encontrada.');
       }
       
-      console.log('✅ Sessão confirmada antes de chamar Edge Function (cartão)', {
-        hasToken: !!latestToken,
-        tokenType: typeof latestToken,
-        tokenLength: latestToken?.length,
-        tokenPreview: latestToken?.substring(0, 30) + '...',
-        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
-        hasAnonKey: !!supabaseAnonKey
-      });
-      
-      // Usar fetch direto para garantir que os headers são enviados corretamente
+      // 🔹 2️⃣ Chamada correta da Edge Function
       const edgeFunctionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+      
+      console.log('📤 Chamando createPayment Edge Function (Cartão)...');
       
       const fetchResponse = await fetch(edgeFunctionUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${latestToken}`,
+          'Authorization': `Bearer ${accessToken}`, // Token obtido NA HORA, validado acima
           'apikey': supabaseAnonKey,
         },
         body: JSON.stringify({
