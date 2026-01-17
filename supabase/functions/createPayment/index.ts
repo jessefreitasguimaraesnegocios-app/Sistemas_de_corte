@@ -33,12 +33,10 @@ serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
-  // TESTE MÍNIMO - Descomente para testar se a função está sendo chamada
-  // console.log("✅ FUNÇÃO createPayment CHAMADA - TESTE MÍNIMO");
-  // return new Response(
-  //   JSON.stringify({ ok: true, message: "Função funcionando!" }),
-  //   { status: 200, headers: corsHeaders }
-  // );
+  // ✅ TESTE MÍNIMO - Verificar se a função está sendo chamada
+  console.log("✅ FUNÇÃO createPayment CHAMADA - TESTE MÍNIMO");
+  console.log("📋 Método HTTP:", req.method);
+  console.log("📋 URL:", req.url);
 
   try {
     // ✅ TESTE DEFINITIVO: Log de headers no topo

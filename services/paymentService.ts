@@ -185,17 +185,33 @@ export async function criarPagamentoPix(
       // Processar resposta
       if (invokeError) {
         responseError = invokeError;
+        
+        // Tentar extrair detalhes do erro do context
+        let errorDetails = invokeError.message || 'Erro ao criar pagamento';
+        if (invokeError.context?.body) {
+          try {
+            const errorBody = typeof invokeError.context.body === 'string' 
+              ? JSON.parse(invokeError.context.body) 
+              : invokeError.context.body;
+            if (errorBody.error) errorDetails = errorBody.error;
+            if (errorBody.details) errorDetails += ` - ${errorBody.details}`;
+          } catch (e) {
+            // Ignorar erro de parse
+          }
+        }
+        
         responseData = {
-          error: invokeError.message || 'Erro ao criar pagamento',
+          error: errorDetails,
           code: invokeError.status || 401,
-          message: invokeError.message || 'Invalid JWT'
+          message: errorDetails
         };
         
         console.error('❌ Erro ao chamar createPayment:', {
           error: invokeError,
           message: invokeError.message,
           status: invokeError.status,
-          context: invokeError.context
+          context: invokeError.context,
+          errorDetails
         });
       } else {
         responseData = invokeData;
