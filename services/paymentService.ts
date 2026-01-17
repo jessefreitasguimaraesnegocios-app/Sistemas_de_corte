@@ -153,8 +153,18 @@ export async function criarPagamentoPix(
         businessId
       });
       
+      // Garantir que a sessão está ativa no Supabase client antes de chamar
+      // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
+      const currentSession = await supabase.auth.getSession();
+      if (!currentSession.data?.session) {
+        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Sessão confirmada antes de chamar Edge Function');
+      
       // Usar supabase.functions.invoke em vez de fetch direto
       // O Supabase client gerencia automaticamente a autenticação
+      // NÃO passar Authorization manualmente - o client já envia automaticamente
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
@@ -162,9 +172,6 @@ export async function criarPagamentoPix(
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
         },
       });
       
@@ -374,8 +381,18 @@ export async function criarPagamentoCartao(
         businessId
       });
       
+      // Garantir que a sessão está ativa no Supabase client antes de chamar
+      // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
+      const currentSession = await supabase.auth.getSession();
+      if (!currentSession.data?.session) {
+        throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Sessão confirmada antes de chamar Edge Function (cartão)');
+      
       // Usar supabase.functions.invoke em vez de fetch direto
       // O Supabase client gerencia automaticamente a autenticação
+      // NÃO passar Authorization manualmente - o client já envia automaticamente
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
@@ -384,9 +401,6 @@ export async function criarPagamentoCartao(
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
         },
       });
       
