@@ -353,7 +353,18 @@ const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, on
 // --- CRM BUSINESS OWNER VIEW ---
 
 const BusinessOwnerDashboard = ({ business, collaborators, products, services, appointments, setCollaborators, setProducts, setServices, setAppointments, addToast, setBusinesses, businesses }: any) => {
-  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'SERVICES' | 'TEAM' | 'SETTINGS'>('DASHBOARD');
+  // ✅ Verificar se há aba para restaurar após OAuth
+  const getInitialTab = (): 'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'SERVICES' | 'TEAM' | 'SETTINGS' => {
+    if (typeof window !== 'undefined' && window.location?.state) {
+      const state = (window.location as any).state;
+      if (state?.returnTab && ['DASHBOARD', 'APPOINTMENTS', 'STORE', 'SERVICES', 'TEAM', 'SETTINGS'].includes(state.returnTab)) {
+        return state.returnTab;
+      }
+    }
+    return 'DASHBOARD';
+  };
+  
+  const [activeTab, setActiveTab] = useState<'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'SERVICES' | 'TEAM' | 'SETTINGS'>(getInitialTab());
   const [showModal, setShowModal] = useState<string | null>(null);
   const [newItem, setNewItem] = useState<any>({});
   const [editingItem, setEditingItem] = useState<any>(null);
@@ -368,6 +379,20 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
   const [showCurrentPassword, setShowCurrentPassword] = useState(false);
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  // ✅ Restaurar aba SETTINGS após OAuth bem-sucedido
+  useEffect(() => {
+    // Verificar se há aba salva no sessionStorage (após OAuth)
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const savedTab = sessionStorage.getItem('oauth_return_tab');
+      if (savedTab && ['DASHBOARD', 'APPOINTMENTS', 'STORE', 'SERVICES', 'TEAM', 'SETTINGS'].includes(savedTab)) {
+        console.log('🔄 Restaurando aba após OAuth:', savedTab);
+        setActiveTab(savedTab as any);
+        // Limpar após restaurar
+        sessionStorage.removeItem('oauth_return_tab');
+      }
+    }
+  }, []); // Executar apenas uma vez ao montar
 
   // Configuração OAuth Mercado Pago
   const handleStartMpOauth = async () => {
@@ -452,6 +477,13 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
       console.log('✅ URL OAuth recebida com sucesso!');
       console.log('✅ Redirecionando para:', oauthUrl);
+      
+      // ✅ Salvar aba atual para restaurar após OAuth
+      // O botão está na aba SETTINGS, então salvamos isso
+      if (typeof window !== 'undefined' && window.sessionStorage) {
+        sessionStorage.setItem('oauth_return_tab', 'SETTINGS');
+        console.log('💾 Aba SETTINGS salva para restaurar após OAuth');
+      }
       
       // Redirecionar para URL de OAuth
       window.location.href = oauthUrl;
@@ -5729,22 +5761,25 @@ export default function App() {
   // Recarregar business após OAuth bem-sucedido
   useEffect(() => {
     if (location.state?.oauthSuccess && user?.role === 'BUSINESS_OWNER' && user?.id && !fetchingUserBusinessRef.current) {
-      // Verificar se já tem o business antes de buscar novamente
-      if (userBusiness && userBusiness.mp_access_token) {
-        // Já tem token, apenas mostrar toast
-        addToast(location.state?.message || 'Mercado Pago conectado com sucesso!', 'success');
-        window.history.replaceState({}, document.title, location.pathname);
-        return;
-      }
+      console.log('🔄 OAuth sucesso detectado, recarregando business...', {
+        businessId: location.state?.businessId,
+        returnTab: location.state?.returnTab,
+        userId: user.id,
+      });
       
-      // Recarregar business do usuário após OAuth
+      // Recarregar business do usuário após OAuth (sempre recarregar para pegar tokens atualizados)
       fetchUserBusiness(user.id).then(() => {
+        console.log('✅ Business recarregado após OAuth');
         addToast(location.state?.message || 'Mercado Pago conectado com sucesso!', 'success');
         // Limpar state para não recarregar novamente
         window.history.replaceState({}, document.title, location.pathname);
+      }).catch((error) => {
+        console.error('❌ Erro ao recarregar business após OAuth:', error);
+        addToast('Conexão realizada, mas houve erro ao atualizar dados. Recarregue a página.', 'warning');
+        window.history.replaceState({}, document.title, location.pathname);
       });
     }
-  }, [location.state, user, userBusiness, fetchUserBusiness, addToast]);
+  }, [location.state, user, fetchUserBusiness, addToast]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans">

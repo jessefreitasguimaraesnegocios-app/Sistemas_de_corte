@@ -143,15 +143,26 @@ export default function OAuthCallback() {
         setStatus('success');
         setMessage('Mercado Pago conectado com sucesso! Redirecionando...');
 
+        // ✅ Verificar se há aba salva para restaurar (mantém no sessionStorage)
+        const returnTab = typeof window !== 'undefined' && window.sessionStorage 
+          ? sessionStorage.getItem('oauth_return_tab') || 'SETTINGS'
+          : 'SETTINGS';
+        
+        console.log('🔄 Aba para restaurar após OAuth:', returnTab);
+
         // Redirecionar para a página principal após 1.5 segundos
+        // O sessionStorage será lido pelo BusinessOwnerDashboard para restaurar a aba
         setTimeout(() => {
           if (isMounted) {
             navigate('/', { 
+              replace: true, // Usar replace para não criar entrada no histórico
               state: { 
                 oauthSuccess: true,
-                message: 'Mercado Pago conectado com sucesso!'
+                message: 'Mercado Pago conectado com sucesso!',
+                businessId: state, // Passar business_id para garantir recarregamento
               }
             });
+            // NÃO limpar sessionStorage aqui - será limpo pelo BusinessOwnerDashboard após restaurar
           }
         }, 1500);
 
