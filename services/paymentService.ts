@@ -156,15 +156,22 @@ export async function criarPagamentoPix(
       // Garantir que a sessão está ativa no Supabase client antes de chamar
       // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
       const currentSession = await supabase.auth.getSession();
-      if (!currentSession.data?.session) {
+      if (!currentSession.data?.session || !currentSession.data.session.access_token) {
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
       }
       
-      console.log('✅ Sessão confirmada antes de chamar Edge Function');
+      // Obter o token mais recente da sessão
+      const latestToken = currentSession.data.session.access_token;
       
-      // Usar supabase.functions.invoke em vez de fetch direto
-      // O Supabase client gerencia automaticamente a autenticação
-      // NÃO passar Authorization manualmente - o client já envia automaticamente
+      console.log('✅ Sessão confirmada antes de chamar Edge Function', {
+        hasToken: !!latestToken,
+        tokenType: typeof latestToken,
+        tokenLength: latestToken?.length,
+        tokenPreview: latestToken?.substring(0, 30) + '...'
+      });
+      
+      // Usar supabase.functions.invoke com Authorization header explícito
+      // IMPORTANTE: Com verify_jwt = true, o gateway precisa do token no header
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
@@ -172,6 +179,9 @@ export async function criarPagamentoPix(
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        headers: {
+          Authorization: `Bearer ${latestToken}`,
         },
       });
       
@@ -384,15 +394,22 @@ export async function criarPagamentoCartao(
       // Garantir que a sessão está ativa no Supabase client antes de chamar
       // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
       const currentSession = await supabase.auth.getSession();
-      if (!currentSession.data?.session) {
+      if (!currentSession.data?.session || !currentSession.data.session.access_token) {
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
       }
       
-      console.log('✅ Sessão confirmada antes de chamar Edge Function (cartão)');
+      // Obter o token mais recente da sessão
+      const latestToken = currentSession.data.session.access_token;
       
-      // Usar supabase.functions.invoke em vez de fetch direto
-      // O Supabase client gerencia automaticamente a autenticação
-      // NÃO passar Authorization manualmente - o client já envia automaticamente
+      console.log('✅ Sessão confirmada antes de chamar Edge Function (cartão)', {
+        hasToken: !!latestToken,
+        tokenType: typeof latestToken,
+        tokenLength: latestToken?.length,
+        tokenPreview: latestToken?.substring(0, 30) + '...'
+      });
+      
+      // Usar supabase.functions.invoke com Authorization header explícito
+      // IMPORTANTE: Com verify_jwt = true, o gateway precisa do token no header
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
@@ -401,6 +418,9 @@ export async function criarPagamentoCartao(
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        headers: {
+          Authorization: `Bearer ${latestToken}`,
         },
       });
       
