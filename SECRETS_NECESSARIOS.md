@@ -36,7 +36,6 @@
 
 ### 3. `createPayment`
 **Secrets OBRIGATÓRIOS:**
-- ✅ `MP_SPONSOR_ID_LOJA` - ID do Sponsor (loja) no Mercado Pago
 - ✅ `SUPABASE_URL` - URL do projeto Supabase
 - ✅ `SUPABASE_ANON_KEY` - Chave anon do Supabase
 - ✅ `SUPABASE_SERVICE_ROLE_KEY` - Chave service_role do Supabase
@@ -44,10 +43,11 @@
 **Secrets OPCIONAIS:**
 - ⚠️ `MP_WEBHOOK_URL` - URL do webhook (opcional)
 
-**NÃO precisa:**
+**NÃO precisa (vem do banco de dados):**
+- ❌ `MP_SPONSOR_ID_LOJA` - **NÃO é secret!** Vem do banco (`business.mp_user_id`)
 - ❌ `MP_CLIENT_ID`
 - ❌ `MP_CLIENT_SECRET`
-- ❌ `MP_ACCESS_TOKEN_VENDEDOR` (vem do banco de dados - `business.mp_access_token`)
+- ❌ `MP_ACCESS_TOKEN_VENDEDOR` - Vem do banco (`business.mp_access_token`)
 
 ---
 
@@ -82,11 +82,18 @@ Estes secrets podem ser configurados globalmente ou por função:
    - Cada business tem seu próprio token
    - O token é obtido via OAuth e salvo automaticamente
 
-2. **`MP_REDIRECT_URI`** é opcional:
+2. **`MP_SPONSOR_ID_LOJA`** NÃO é um secret da Edge Function!
+   - **ERRADO:** Buscar de `Deno.env.get("MP_SPONSOR_ID_LOJA")`
+   - **CORRETO:** Buscar de `business.mp_user_id` (obtido via OAuth)
+   - Cada business tem seu próprio `mp_user_id` (User ID do Mercado Pago)
+   - Secrets são globais - não podem ser diferentes por business
+   - **Arquitetura correta:** Marketplace onde cada bar tem seu próprio sponsor_id
+
+3. **`MP_REDIRECT_URI`** é opcional:
    - Pode ser passado no body da requisição (recomendado)
    - Ou configurado como secret (menos flexível)
 
-3. **`MP_WEBHOOK_URL`** é opcional:
+4. **`MP_WEBHOOK_URL`** é opcional:
    - Usado apenas para configurar webhooks no Mercado Pago
    - Não é necessário para processar pagamentos
 
@@ -104,10 +111,10 @@ Estes secrets podem ser configurados globalmente ou por função:
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` configurado
 
 ### Para `createPayment`:
-- [ ] `MP_SPONSOR_ID_LOJA` configurado
 - [ ] `SUPABASE_URL` configurado
 - [ ] `SUPABASE_ANON_KEY` configurado
 - [ ] `SUPABASE_SERVICE_ROLE_KEY` configurado
+- [ ] Business conectado ao Mercado Pago (tem `mp_user_id` e `mp_access_token` no banco)
 
 ### Para `mercadopago-webhook`:
 - [ ] `MP_WEBHOOK_SECRET` configurado
@@ -120,6 +127,8 @@ Estes secrets podem ser configurados globalmente ou por função:
 
 Estes secrets não são necessários e não devem ser configurados:
 
-- ❌ `MP_ACCESS_TOKEN_VENDEDOR` - Vem do banco de dados
-- ❌ `MP_PUBLIC_KEY` - Vem do banco de dados (se necessário)
-- ❌ `MP_REFRESH_TOKEN` - Vem do banco de dados
+- ❌ `MP_SPONSOR_ID_LOJA` - **NUNCA configurar como secret!** Vem do banco (`business.mp_user_id`)
+- ❌ `MP_ACCESS_TOKEN_VENDEDOR` - Vem do banco de dados (`business.mp_access_token`)
+- ❌ `MP_PUBLIC_KEY` - Vem do banco de dados (`business.mp_public_key`)
+- ❌ `MP_REFRESH_TOKEN` - Vem do banco de dados (`business.mp_refresh_token`)
+- ❌ `MP_USER_ID` - Vem do banco de dados (`business.mp_user_id`)

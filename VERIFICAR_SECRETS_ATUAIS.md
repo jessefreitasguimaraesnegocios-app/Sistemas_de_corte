@@ -36,16 +36,7 @@
 
 ## ❌ Secrets FALTANDO (Obrigatórios):
 
-### 1. **MP_SPONSOR_ID_LOJA** ❌
-   - **Status:** NÃO CONFIGURADO
-   - **Obrigatório para:** `createPayment`
-   - **O que é:** ID do Sponsor (loja) no Mercado Pago
-   - **Onde encontrar:** 
-     - No painel do Mercado Pago → Credenciais
-     - É o User ID da conta que recebe o split
-   - **Valor esperado:** Número (ex: `2622924811`)
-
-### 2. **MP_WEBHOOK_SECRET** ❌
+### 1. **MP_WEBHOOK_SECRET** ❌
    - **Status:** NÃO CONFIGURADO
    - **Obrigatório para:** `mercadopago-webhook`
    - **O que é:** Secret para validar webhooks do Mercado Pago
@@ -63,16 +54,28 @@
 
 ---
 
+## ⚠️ IMPORTANTE - CORREÇÃO ARQUITETURAL
+
+### ❌ NÃO adicionar `MP_SPONSOR_ID_LOJA` como secret!
+
+**Por quê?**
+- Secrets são globais (mesmo valor para todos)
+- Cada business tem seu próprio `mp_user_id` (obtido via OAuth)
+- Se usar secret global, todos os pagamentos teriam o mesmo sponsor_id
+- Isso quebra o marketplace quando há múltiplos businesses
+
+**✅ Solução correta:**
+- O código agora busca `mp_user_id` do banco (`business.mp_user_id`)
+- Cada business conecta via OAuth e recebe seu próprio `mp_user_id`
+- O `mp_user_id` é salvo automaticamente no banco após OAuth
+
+---
+
 ## 🚨 AÇÃO NECESSÁRIA
 
-### Adicionar estes 2 secrets:
+### Adicionar apenas 1 secret:
 
-1. **MP_SPONSOR_ID_LOJA**
-   - Nome: `MP_SPONSOR_ID_LOJA`
-   - Valor: `2622924811` (ou seu ID do Sponsor)
-   - **CRÍTICO:** Sem isso, `createPayment` não funciona!
-
-2. **MP_WEBHOOK_SECRET**
+1. **MP_WEBHOOK_SECRET**
    - Nome: `MP_WEBHOOK_SECRET`
    - Valor: (secret do webhook do Mercado Pago)
    - **CRÍTICO:** Sem isso, `mercadopago-webhook` não valida webhooks!
@@ -85,25 +88,28 @@
 2. Clique em **"Secrets"** (no menu lateral)
 3. Clique em **"Add another"**
 4. Adicione:
-   - Nome: `MP_SPONSOR_ID_LOJA`
-   - Valor: `2622924811` (ou seu ID)
-5. Clique em **"Add another"** novamente
-6. Adicione:
    - Nome: `MP_WEBHOOK_SECRET`
-   - Valor: (seu secret do webhook)
-7. Clique em **"Save"**
+   - Valor: (seu secret do webhook do Mercado Pago)
+5. Clique em **"Save"**
+
+**⚠️ NÃO adicione `MP_SPONSOR_ID_LOJA` - ele vem do banco de dados!**
 
 ---
 
 ## 🎯 Resumo
 
 **Secrets configurados:** 7 ✅
-**Secrets faltando:** 2 ❌
+**Secrets faltando:** 1 ❌
 
-**Status geral:** ⚠️ Quase completo - faltam 2 secrets obrigatórios
+**Status geral:** ✅ Quase completo - falta apenas 1 secret obrigatório
 
 **Impacto:**
-- ❌ `createPayment` não funciona sem `MP_SPONSOR_ID_LOJA`
+- ✅ `createPayment` funciona (usa `mp_user_id` do banco)
 - ❌ `mercadopago-webhook` não valida webhooks sem `MP_WEBHOOK_SECRET`
 - ✅ `getMpOauthUrl` funciona
 - ✅ `mp-oauth-callback` funciona
+
+**✅ Correção aplicada:**
+- `createPayment` agora busca `mp_user_id` do banco (não precisa de secret)
+- Cada business tem seu próprio `mp_user_id` (obtido via OAuth)
+- Arquitetura correta para marketplace

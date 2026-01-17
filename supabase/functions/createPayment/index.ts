@@ -6,8 +6,7 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Configurações do Mercado Pago
-const SPONSOR_ID_LOJA_STR = Deno.env.get("MP_SPONSOR_ID_LOJA") || "";
-const SPONSOR_ID_LOJA = SPONSOR_ID_LOJA_STR ? Number(SPONSOR_ID_LOJA_STR) : null;
+// ⚠️ MP_SPONSOR_ID_LOJA NÃO deve ser secret - vem do banco (business.mp_user_id)
 const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 
 // Configurações do Supabase
@@ -199,9 +198,10 @@ serve(async (req: Request) => {
     });
 
     console.log("🔍 Buscando business:", business_id);
+    // ✅ BUSCAR BUSINESS COM CAMPOS NECESSÁRIOS DO MERCADO PAGO
     const { data: business, error: businessError } = await supabaseAdmin
       .from("businesses")
-      .select("*")
+      .select("id, name, mp_access_token, mp_user_id, revenue_split")
       .eq("id", business_id)
       .single();
 
@@ -234,14 +234,18 @@ serve(async (req: Request) => {
     const COMISSAO_PERCENTUAL = business.revenue_split || 10;
     const marketplace_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
 
-    // ✅ VALIDAR SPONSOR_ID
-    if (!SPONSOR_ID_LOJA || isNaN(SPONSOR_ID_LOJA)) {
+    // ✅ OBTER SPONSOR_ID DO BANCO (mp_user_id do business)
+    // Cada business tem seu próprio mp_user_id (obtido via OAuth)
+    // NÃO usar secret global - isso quebraria o marketplace
+    const SPONSOR_ID_BUSINESS = business.mp_user_id;
+    
+    if (!SPONSOR_ID_BUSINESS) {
       return new Response(
         JSON.stringify({ 
-          error: "Configuração de split incompleta.",
-          hint: "MP_SPONSOR_ID_LOJA não configurado ou inválido"
+          error: "Estabelecimento não possui User ID do Mercado Pago configurado.",
+          hint: "Conecte o estabelecimento ao Mercado Pago via OAuth primeiro."
         }),
-        { status: 500, headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -261,7 +265,7 @@ serve(async (req: Request) => {
       },
       integration_data: {
         sponsor: {
-          id: String(SPONSOR_ID_LOJA)
+          id: String(SPONSOR_ID_BUSINESS) // mp_user_id do business (obtido via OAuth)
         }
       }
     };
@@ -297,7 +301,8 @@ serve(async (req: Request) => {
       valorTotal: valor,
       comissaoPercentual: COMISSAO_PERCENTUAL,
       marketplaceFee: marketplace_fee,
-      sponsorId: SPONSOR_ID_LOJA,
+      sponsorId: SPONSOR_ID_BUSINESS,
+      businessId: business_id,
     });
 
     // ✅ CHAMAR API MERCADO PAGO
