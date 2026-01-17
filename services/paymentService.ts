@@ -1,6 +1,13 @@
 import { supabase } from '../lib/supabase';
 import { PaymentRequest, PixPaymentResponse, CreditCardPaymentResponse } from '../types';
 
+// Obter URL e anon key do Supabase
+const getSupabaseConfig = () => {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  return { supabaseUrl, supabaseAnonKey };
+};
+
 /**
  * Verifica o status de um pagamento PIX
  * @param paymentId ID do pagamento retornado pelo Mercado Pago
@@ -154,7 +161,6 @@ export async function criarPagamentoPix(
       });
       
       // Garantir que a sessão está ativa no Supabase client antes de chamar
-      // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
       const currentSession = await supabase.auth.getSession();
       if (!currentSession.data?.session || !currentSession.data.session.access_token) {
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
@@ -163,44 +169,66 @@ export async function criarPagamentoPix(
       // Obter o token mais recente da sessão
       const latestToken = currentSession.data.session.access_token;
       
+      // Obter configuração do Supabase
+      const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Configuração do Supabase não encontrada.');
+      }
+      
       console.log('✅ Sessão confirmada antes de chamar Edge Function', {
         hasToken: !!latestToken,
         tokenType: typeof latestToken,
         tokenLength: latestToken?.length,
-        tokenPreview: latestToken?.substring(0, 30) + '...'
+        tokenPreview: latestToken?.substring(0, 30) + '...',
+        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
+        hasAnonKey: !!supabaseAnonKey
       });
       
-      // Usar supabase.functions.invoke com Authorization header explícito
-      // IMPORTANTE: Com verify_jwt = true, o gateway precisa do token no header
-      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
-        body: {
+      // Usar fetch direto para garantir que os headers são enviados corretamente
+      // O supabase.functions.invoke pode não estar enviando o Authorization corretamente
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+      
+      const fetchResponse = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${latestToken}`,
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({
           valor,
           metodo_pagamento: 'pix',
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
-        headers: {
-          Authorization: `Bearer ${latestToken}`,
-        },
+        }),
       });
       
-      // Processar resposta do invoke
-      if (invokeError) {
-        responseError = invokeError;
+      // Processar resposta
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Erro desconhecido' };
+        }
+        
+        responseError = new Error(errorData.error || `HTTP ${fetchResponse.status}`);
         responseData = {
-          error: invokeError.message || 'Erro ao criar pagamento',
-          code: invokeError.status || 401,
-          message: invokeError.message || 'Invalid JWT'
+          error: errorData.error || 'Erro ao criar pagamento',
+          code: fetchResponse.status,
+          message: errorData.message || errorData.error || `HTTP ${fetchResponse.status}`
         };
+        
         console.error('❌ Erro ao chamar createPayment:', {
-          error: invokeError,
-          message: invokeError.message,
-          status: invokeError.status,
-          context: invokeError.context
+          status: fetchResponse.status,
+          statusText: fetchResponse.statusText,
+          errorData,
+          responseText: errorText
         });
       } else {
-        responseData = invokeData;
+        responseData = await fetchResponse.json();
       }
     } catch (fetchError: any) {
       console.error('❌ Erro ao chamar Edge Function:', fetchError);
@@ -392,7 +420,6 @@ export async function criarPagamentoCartao(
       });
       
       // Garantir que a sessão está ativa no Supabase client antes de chamar
-      // O Supabase client precisa ter a sessão atualizada para enviar o token automaticamente
       const currentSession = await supabase.auth.getSession();
       if (!currentSession.data?.session || !currentSession.data.session.access_token) {
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
@@ -401,28 +428,67 @@ export async function criarPagamentoCartao(
       // Obter o token mais recente da sessão
       const latestToken = currentSession.data.session.access_token;
       
+      // Obter configuração do Supabase
+      const { supabaseUrl, supabaseAnonKey } = getSupabaseConfig();
+      if (!supabaseUrl || !supabaseAnonKey) {
+        throw new Error('Configuração do Supabase não encontrada.');
+      }
+      
       console.log('✅ Sessão confirmada antes de chamar Edge Function (cartão)', {
         hasToken: !!latestToken,
         tokenType: typeof latestToken,
         tokenLength: latestToken?.length,
-        tokenPreview: latestToken?.substring(0, 30) + '...'
+        tokenPreview: latestToken?.substring(0, 30) + '...',
+        supabaseUrl: supabaseUrl?.substring(0, 30) + '...',
+        hasAnonKey: !!supabaseAnonKey
       });
       
-      // Usar supabase.functions.invoke com Authorization header explícito
-      // IMPORTANTE: Com verify_jwt = true, o gateway precisa do token no header
-      const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
-        body: {
+      // Usar fetch direto para garantir que os headers são enviados corretamente
+      const edgeFunctionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+      
+      const fetchResponse = await fetch(edgeFunctionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${latestToken}`,
+          'apikey': supabaseAnonKey,
+        },
+        body: JSON.stringify({
           valor,
           metodo_pagamento: 'credit_card',
           email_cliente: email,
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        },
-        headers: {
-          Authorization: `Bearer ${latestToken}`,
-        },
+        }),
       });
+      
+      // Processar resposta
+      let invokeData, invokeError;
+      if (!fetchResponse.ok) {
+        const errorText = await fetchResponse.text();
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch {
+          errorData = { error: errorText || 'Erro desconhecido' };
+        }
+        invokeError = {
+          message: errorData.error || `HTTP ${fetchResponse.status}`,
+          status: fetchResponse.status,
+          context: { response: errorData }
+        };
+        invokeData = null;
+        
+        console.error('❌ Erro ao chamar createPayment (cartão):', {
+          status: fetchResponse.status,
+          statusText: fetchResponse.statusText,
+          errorData
+        });
+      } else {
+        invokeData = await fetchResponse.json();
+        invokeError = null;
+      }
       
       // Processar resposta do invoke
       if (invokeError) {
