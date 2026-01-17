@@ -43,7 +43,17 @@ serve(async (req: Request) => {
       hasMPRedirectUri: !!MP_REDIRECT_URI,
     });
 
-    // Validar MP_CLIENT_ID (única validação necessária)
+    // Ler body primeiro
+    const { business_id, redirect_uri } = await req.json();
+
+    if (!business_id) {
+      return new Response(
+        JSON.stringify({ error: "business_id é obrigatório" }),
+        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
+    // Validar MP_CLIENT_ID (única validação obrigatória de secret)
     if (!MP_CLIENT_ID) {
       return new Response(
         JSON.stringify({ 
@@ -54,24 +64,16 @@ serve(async (req: Request) => {
       );
     }
 
-    const { business_id, redirect_uri } = await req.json();
-
-    if (!business_id) {
-      return new Response(
-        JSON.stringify({ error: "business_id é obrigatório" }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     // Usar redirect_uri do body (dinâmico do frontend) ou fallback para secret
     // Isso permite funcionar em dev (localhost) e produção (vercel) sem reconfigurar secrets
     const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
     
+    // redirect_uri é obrigatório, mas pode vir do body OU do secret
     if (!finalRedirectUri) {
       return new Response(
         JSON.stringify({ 
-          error: "redirect_uri não fornecido e MP_REDIRECT_URI não configurado",
-          hint: "Configure o secret MP_REDIRECT_URI no Supabase Dashboard OU passe redirect_uri no body da requisição"
+          error: "redirect_uri é obrigatório",
+          hint: "Passe redirect_uri no body da requisição OU configure o secret MP_REDIRECT_URI no Supabase Dashboard"
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );

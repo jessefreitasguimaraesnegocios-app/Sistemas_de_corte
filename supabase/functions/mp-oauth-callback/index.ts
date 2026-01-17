@@ -29,13 +29,6 @@ serve(async (req: Request) => {
   }
 
   try {
-    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET) {
-      return new Response(
-        JSON.stringify({ error: "MP_CLIENT_ID ou MP_CLIENT_SECRET não configurados nos secrets" }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
-    }
-
     // Aceitar parâmetros tanto do body (JSON) quanto da query string (URL)
     // O Mercado Pago pode enviar via query string, mas o frontend também pode enviar via body
     let code: string | null = null;
@@ -87,15 +80,27 @@ serve(async (req: Request) => {
     // state carrega o business_id para associar tokens
     const businessId = state;
 
+    // Validar secrets obrigatórios APÓS ler parâmetros
+    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET) {
+      return new Response(
+        JSON.stringify({ 
+          error: "MP_CLIENT_ID ou MP_CLIENT_SECRET não configurados nos secrets",
+          hint: "Configure os secrets MP_CLIENT_ID e MP_CLIENT_SECRET no Supabase Dashboard"
+        }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
+      );
+    }
+
     // Usar redirect_uri do body (mesmo usado na autorização) ou fallback para secret
     // IMPORTANTE: O redirect_uri deve ser EXATAMENTE o mesmo usado na URL de autorização
     const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
     
+    // redirect_uri é obrigatório, mas pode vir do body OU do secret
     if (!finalRedirectUri) {
       return new Response(
         JSON.stringify({ 
-          error: "redirect_uri não fornecido e MP_REDIRECT_URI não configurado",
-          hint: "Configure o secret MP_REDIRECT_URI no Supabase Dashboard OU passe redirect_uri no body"
+          error: "redirect_uri é obrigatório",
+          hint: "Passe redirect_uri no body OU configure o secret MP_REDIRECT_URI no Supabase Dashboard"
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
