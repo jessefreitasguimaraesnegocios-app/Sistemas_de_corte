@@ -167,12 +167,11 @@ export async function criarPagamentoPix(
         tokenPreview: accessToken.substring(0, 25) + '...',
       });
       
-      // ✅ SOLUÇÃO RECOMENDADA: Usar supabase.functions.invoke
-      // O Supabase injeta o JWT automaticamente e evita problemas de header/Invalid JWT
-      // NÃO passar Authorization manualmente - o client já envia automaticamente
+      // ✅ SOLUÇÃO: Usar supabase.functions.invoke com header explícito
+      // Quando verify_jwt = false, precisamos enviar o header manualmente
       console.log('📤 Chamando createPayment Edge Function (PIX) via supabase.functions.invoke...');
       
-      // ✅ VERIFICAR TOKEN ANTES DE CHAMAR (debug)
+      // ✅ OBTER TOKEN FINAL ANTES DE CHAMAR
       const { data: { session: finalSession } } = await supabase.auth.getSession();
       console.log('🔐 Token final antes de invoke:', {
         hasSession: !!finalSession,
@@ -183,6 +182,11 @@ export async function criarPagamentoPix(
         timeUntilExpiry: finalSession?.expires_at ? finalSession.expires_at - Math.floor(Date.now() / 1000) : null,
       });
       
+      if (!finalSession?.access_token) {
+        throw new Error('Token de autenticação não encontrado. Faça login novamente.');
+      }
+      
+      // ✅ ENVIAR HEADER AUTHORIZATION EXPLICITAMENTE (necessário quando verify_jwt = false)
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
@@ -190,6 +194,9 @@ export async function criarPagamentoPix(
           email_cliente: email,
           business_id: businessId,
           referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        headers: {
+          Authorization: `Bearer ${finalSession.access_token}`,
         },
       });
       
@@ -401,9 +408,16 @@ export async function criarPagamentoCartao(
         throw new Error('Token de autenticação inválido. Por favor, faça login novamente.');
       }
       
-      // ✅ SOLUÇÃO RECOMENDADA: Usar supabase.functions.invoke
-      // O Supabase injeta o JWT automaticamente e evita problemas de header
+      // ✅ SOLUÇÃO: Usar supabase.functions.invoke com header explícito
+      // Quando verify_jwt = false, precisamos enviar o header manualmente
       console.log('📤 Chamando createPayment Edge Function (Cartão) via supabase.functions.invoke...');
+      
+      // ✅ OBTER TOKEN FINAL ANTES DE CHAMAR
+      const { data: { session: finalSessionCartao } } = await supabase.auth.getSession();
+      
+      if (!finalSessionCartao?.access_token) {
+        throw new Error('Token de autenticação não encontrado. Faça login novamente.');
+      }
       
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
@@ -413,6 +427,9 @@ export async function criarPagamentoCartao(
           token_cartao: tokenCartao,
           business_id: businessId,
           referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+        },
+        headers: {
+          Authorization: `Bearer ${finalSessionCartao.access_token}`,
         },
       });
       

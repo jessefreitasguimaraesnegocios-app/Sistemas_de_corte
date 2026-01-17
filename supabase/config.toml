@@ -1,7 +1,7 @@
 [project]
 
 [functions.createPayment]
-verify_jwt = true
+verify_jwt = false
 
 [functions.checkPaymentStatus]
 verify_jwt = false

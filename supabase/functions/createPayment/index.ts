@@ -36,6 +36,15 @@ serve(async (req: Request) => {
     console.log("📋 Método:", req.method);
     console.log("📋 URL:", req.url);
     
+    // ✅ LOG TODOS OS HEADERS (debug completo)
+    const allHeaders: Record<string, string> = {};
+    req.headers.forEach((value, key) => {
+      allHeaders[key] = key.toLowerCase().includes('authorization') 
+        ? `${value.substring(0, 30)}...` 
+        : value;
+    });
+    console.log("📋 TODOS OS HEADERS recebidos:", allHeaders);
+    
     // ✅ OBTER HEADER AUTHORIZATION
     const authHeader = req.headers.get("authorization") || 
                       req.headers.get("Authorization") || 
@@ -45,6 +54,7 @@ serve(async (req: Request) => {
       exists: !!authHeader,
       length: authHeader.length,
       preview: authHeader ? `${authHeader.substring(0, 30)}...` : "null",
+      startsWithBearer: authHeader.startsWith("Bearer "),
     });
     
     // ✅ VALIDAR SE HEADER EXISTE
