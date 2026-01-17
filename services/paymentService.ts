@@ -172,6 +172,17 @@ export async function criarPagamentoPix(
       // NÃO passar Authorization manualmente - o client já envia automaticamente
       console.log('📤 Chamando createPayment Edge Function (PIX) via supabase.functions.invoke...');
       
+      // ✅ VERIFICAR TOKEN ANTES DE CHAMAR (debug)
+      const { data: { session: finalSession } } = await supabase.auth.getSession();
+      console.log('🔐 Token final antes de invoke:', {
+        hasSession: !!finalSession,
+        hasUser: !!finalSession?.user,
+        tokenPreview: finalSession?.access_token?.substring(0, 30) + '...',
+        expiresAt: finalSession?.expires_at,
+        now: Math.floor(Date.now() / 1000),
+        timeUntilExpiry: finalSession?.expires_at ? finalSession.expires_at - Math.floor(Date.now() / 1000) : null,
+      });
+      
       const { data: invokeData, error: invokeError } = await supabase.functions.invoke('createPayment', {
         body: {
           valor,
