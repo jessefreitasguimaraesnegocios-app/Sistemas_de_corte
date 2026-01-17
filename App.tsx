@@ -412,14 +412,15 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
       // Chamar Edge Function para obter URL de OAuth
       // Passar redirect_uri dinamicamente para evitar problemas com URLs diferentes (dev/prod)
-      // O Supabase client já adiciona o apikey automaticamente, mas vamos garantir
+      // ✅ ENVIAR HEADER AUTHORIZATION EXPLICITAMENTE (necessário quando verify_jwt = false)
       const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
         body: { 
           business_id: business.id,
           redirect_uri: redirectUri // URL dinâmica do frontend
         },
-        // Não precisamos passar headers manualmente - o Supabase client faz isso automaticamente
-        // Ele já adiciona Authorization e apikey baseado na sessão atual
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
       });
 
       if (error) {
