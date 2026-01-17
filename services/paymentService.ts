@@ -90,6 +90,26 @@ export async function criarPagamentoPix(
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
       
+      // ⚠️ CRÍTICO: refreshSession() pode disparar TOKEN_REFRESHED com hasUser: false temporariamente
+      // Precisamos aguardar o evento estabilizar e garantir que o usuário está carregado
+      console.log('⏳ Aguardando estabilização da sessão após refresh...');
+      
+      // Aguardar um pouco para o evento TOKEN_REFRESHED completar
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Validar novamente após refresh (garantir que usuário está carregado)
+      const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
+      
+      if (getUserAfterRefreshError || !userAfterRefresh) {
+        console.error('❌ ERRO: Usuário não carregado após refresh', {
+          hasUser: !!userAfterRefresh,
+          error: getUserAfterRefreshError?.message
+        });
+        throw new Error('Usuário não autenticado após refresh. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Usuário confirmado após refresh:', { userId: userAfterRefresh.id });
+      
       const sessionData = refreshData;
       
       // 🔹 2️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário após refresh
@@ -303,6 +323,26 @@ export async function criarPagamentoCartao(
         console.error('❌ ERRO ao refreshar sessão (cartão):', refreshError);
         throw new Error('Sessão expirada. Por favor, faça login novamente.');
       }
+      
+      // ⚠️ CRÍTICO: refreshSession() pode disparar TOKEN_REFRESHED com hasUser: false temporariamente
+      // Precisamos aguardar o evento estabilizar e garantir que o usuário está carregado
+      console.log('⏳ Aguardando estabilização da sessão após refresh (cartão)...');
+      
+      // Aguardar um pouco para o evento TOKEN_REFRESHED completar
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      // Validar novamente após refresh (garantir que usuário está carregado)
+      const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
+      
+      if (getUserAfterRefreshError || !userAfterRefresh) {
+        console.error('❌ ERRO: Usuário não carregado após refresh (cartão)', {
+          hasUser: !!userAfterRefresh,
+          error: getUserAfterRefreshError?.message
+        });
+        throw new Error('Usuário não autenticado após refresh. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Usuário confirmado após refresh (cartão):', { userId: userAfterRefresh.id });
       
       const sessionData = refreshData;
       
