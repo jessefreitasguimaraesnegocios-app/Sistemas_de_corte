@@ -210,11 +210,29 @@ export default function CheckoutModal({
     setPaymentStatus(null);
 
     try {
+      // ✅ 1️⃣ BLOQUEAR CHAMADA ENQUANTO hasUser === false
+      // Isso evita chamar PIX quando INITIAL_SESSION ainda não carregou o usuário
+      console.log('🔐 Validando usuário antes de chamar PIX...');
+      const { data: { user }, error: userError } = await supabase.auth.getUser();
+      
+      if (userError || !user) {
+        console.warn('⚠️ Usuário ainda não carregado ou sessão inválida, abortando pagamento', {
+          hasUser: !!user,
+          userError: userError?.message
+        });
+        setError('Sessão inválida. Por favor, faça login novamente e tente novamente.');
+        setLoading(false);
+        return;
+      }
+      
+      console.log('✅ Usuário validado:', { userId: user.id, email: user.email });
+      
       console.log('CheckoutModal - Criando pagamento PIX:', { 
         total, 
         email, 
         businessId,
-        productId
+        productId,
+        userId: user.id
       });
       
       let validBusinessId = businessId;

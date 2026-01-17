@@ -64,6 +64,22 @@ export async function criarPagamentoPix(
       // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento
       // ❌ NUNCA usar token salvo em state, context ou localStorage
       
+      // ✅ 1️⃣ VALIDAÇÃO CRÍTICA: Verificar se usuário está carregado ANTES de tudo
+      // Isso evita chamar quando INITIAL_SESSION ainda não carregou o usuário
+      console.log('🔐 Validando usuário antes de processar pagamento...');
+      const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
+      
+      if (getUserError || !currentUser) {
+        console.error('❌ ERRO CRÍTICO: Usuário não carregado - hasUser: false', {
+          hasUser: !!currentUser,
+          getUserError: getUserError?.message,
+          getUserErrorName: getUserError?.name
+        });
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Usuário confirmado antes de processar:', { userId: currentUser.id });
+      
       // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
       // Isso é crítico quando verify_jwt = true no gateway
       console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function...');
@@ -76,7 +92,7 @@ export async function criarPagamentoPix(
       
       const sessionData = refreshData;
       
-      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
+      // 🔹 2️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário após refresh
       if (!sessionData?.session) {
         console.error('❌ ERRO: Sessão não existe após refresh');
         throw new Error('Sessão não encontrada. Por favor, faça login novamente.');
@@ -84,7 +100,7 @@ export async function criarPagamentoPix(
       
       // ⚠️ VALIDAÇÃO CRÍTICA: Se hasUser: false → 401 garantido
       if (!sessionData.session.user) {
-        console.error('❌ ERRO CRÍTICO: hasUser: false - Sessão existe mas usuário não!', {
+        console.error('❌ ERRO CRÍTICO: hasUser: false após refresh - Sessão existe mas usuário não!', {
           hasSession: !!sessionData.session,
           hasUser: !!sessionData.session.user,
           session: sessionData.session
@@ -262,6 +278,22 @@ export async function criarPagamentoCartao(
     try {
       // ✅ REGRA DE OURO: SEMPRE buscar a sessão NA HORA do pagamento (cartão)
       
+      // ✅ 1️⃣ VALIDAÇÃO CRÍTICA: Verificar se usuário está carregado ANTES de tudo
+      // Isso evita chamar quando INITIAL_SESSION ainda não carregou o usuário
+      console.log('🔐 Validando usuário antes de processar pagamento (cartão)...');
+      const { data: { user: currentUser }, error: getUserError } = await supabase.auth.getUser();
+      
+      if (getUserError || !currentUser) {
+        console.error('❌ ERRO CRÍTICO: Usuário não carregado - hasUser: false (cartão)', {
+          hasUser: !!currentUser,
+          getUserError: getUserError?.message,
+          getUserErrorName: getUserError?.name
+        });
+        throw new Error('Usuário não autenticado. Por favor, faça login novamente.');
+      }
+      
+      console.log('✅ Usuário confirmado antes de processar (cartão):', { userId: currentUser.id });
+      
       // 🔄 FORÇAR REFRESH DA SESSÃO antes de chamar (garante token válido)
       // Isso é crítico quando verify_jwt = true no gateway
       console.log('🔄 Fazendo refresh da sessão antes de chamar Edge Function (cartão)...');
@@ -274,7 +306,7 @@ export async function criarPagamentoCartao(
       
       const sessionData = refreshData;
       
-      // 🔹 1️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário
+      // 🔹 2️⃣ VALIDAÇÃO OBRIGATÓRIA: Verificar sessão E usuário após refresh
       if (!sessionData?.session || !sessionData.session.user) {
         console.error('❌ ERRO: Sessão inválida ou usuário não autenticado (cartão)', {
           hasSession: !!sessionData?.session,
