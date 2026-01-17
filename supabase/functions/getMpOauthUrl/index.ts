@@ -19,6 +19,20 @@ serve(async (req: Request) => {
   }
 
   try {
+    // ✅ LOG NO TOPO - Verificar se função está sendo chamada
+    console.log("✅ FUNÇÃO getMpOauthUrl CHAMADA");
+    console.log("📋 Método:", req.method);
+    console.log("📋 URL:", req.url);
+    
+    // ✅ LOG TODOS OS HEADERS (debug completo)
+    const allHeaders: Record<string, string> = {};
+    req.headers.forEach((value, key) => {
+      allHeaders[key] = key.toLowerCase().includes('authorization') 
+        ? `${value.substring(0, 30)}...` 
+        : value;
+    });
+    console.log("📋 TODOS OS HEADERS recebidos:", allHeaders);
+    
     // Log inicial para debug
     console.log("🚀 getMpOauthUrl chamada:", {
       method: req.method,

@@ -412,15 +412,13 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
       // Chamar Edge Function para obter URL de OAuth
       // Passar redirect_uri dinamicamente para evitar problemas com URLs diferentes (dev/prod)
-      // ✅ ENVIAR HEADER AUTHORIZATION EXPLICITAMENTE (necessário quando verify_jwt = false)
+      // ✅ FUNÇÃO É PÚBLICA (--no-verify-jwt) - não precisa de token
       const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
         body: { 
           business_id: business.id,
           redirect_uri: redirectUri // URL dinâmica do frontend
         },
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-        },
+        // Não enviar Authorization - função é pública
       });
 
       if (error) {
