@@ -5496,9 +5496,10 @@ export default function App() {
       // IMPORTANTE: Verificar se o usuário realmente está autenticado antes de mostrar este erro
       if (!biz && !loadingBusinesses) {
         // Verificar se o problema é autenticação inválida (usuário não existe)
-        const { data: sessionData } = await supabase.auth.getSession();
-        if (!sessionData?.session?.user) {
-          // Se não tem usuário na sessão, fazer logout e mostrar mensagem de login
+        // Usar verificação síncrona - se user existe mas não tem business, é problema de dados
+        // Se user não existe, o onAuthStateChange já deve ter tratado
+        if (!user || !user.id) {
+          // Se não tem usuário no estado, fazer logout e mostrar mensagem de login
           handleLogout();
           return (
             <div className="flex items-center justify-center min-h-[calc(100vh-64px)]">
