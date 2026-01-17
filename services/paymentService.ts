@@ -95,7 +95,8 @@ export async function criarPagamentoPix(
       console.log('⏳ Aguardando estabilização da sessão após refresh...');
       
       // Aguardar um pouco para o evento TOKEN_REFRESHED completar
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // O evento TOKEN_REFRESHED pode ter hasUser: false temporariamente
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // Validar novamente após refresh (garantir que usuário está carregado)
       const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
@@ -329,7 +330,8 @@ export async function criarPagamentoCartao(
       console.log('⏳ Aguardando estabilização da sessão após refresh (cartão)...');
       
       // Aguardar um pouco para o evento TOKEN_REFRESHED completar
-      await new Promise(resolve => setTimeout(resolve, 100));
+      // O evento TOKEN_REFRESHED pode ter hasUser: false temporariamente
+      await new Promise(resolve => setTimeout(resolve, 300));
       
       // Validar novamente após refresh (garantir que usuário está carregado)
       const { data: { user: userAfterRefresh }, error: getUserAfterRefreshError } = await supabase.auth.getUser();
