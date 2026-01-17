@@ -41,6 +41,9 @@ serve(async (req: Request) => {
   // );
 
   try {
+    // ✅ TESTE DEFINITIVO: Log de headers no topo
+    console.log("📋 HEADERS recebidos:", Object.fromEntries(req.headers.entries()));
+    
     // Validar autenticação do usuário
     const authHeader = req.headers.get("authorization") || 
                       req.headers.get("Authorization") || 
@@ -70,15 +73,12 @@ serve(async (req: Request) => {
       );
     }
 
-    // Extrair token do header
-    const token = authHeader.replace("Bearer ", "");
-    
     // Validar credenciais do Supabase antes de criar cliente
-    if (!SUPABASE_URL || !SUPABASE_ANON_KEY || !SUPABASE_SERVICE_ROLE_KEY) {
-      console.error("❌ Configuração do Supabase incompleta");
+    if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+      console.error("❌ Configuração do Supabase incompleta - ANON_KEY é obrigatória para validar JWT");
       return new Response(
         JSON.stringify({ 
-          error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL, SUPABASE_ANON_KEY e SUPABASE_SERVICE_ROLE_KEY devem estar configuradas." 
+          error: "Configuração do Supabase incompleta. As variáveis SUPABASE_URL e SUPABASE_ANON_KEY devem estar configuradas." 
         }),
         { 
           status: 500, 
@@ -87,23 +87,36 @@ serve(async (req: Request) => {
       );
     }
 
-    // Criar cliente Supabase com ANON_KEY para validar o JWT do usuário
-    // O Service Role Key bypassa autenticação, então não pode validar JWT
-    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
-      global: {
-        headers: {
-          Authorization: authHeader,
+    // ✅ FORMA CORRETA (OBRIGATÓRIA): Criar cliente com ANON_KEY e repassar Authorization
+    // ❌ NUNCA usar SERVICE_ROLE_KEY para validar usuário logado
+    // ✅ SEMPRE repassar o header Authorization para o client
+    const supabaseClient = createClient(
+      SUPABASE_URL,
+      SUPABASE_ANON_KEY, // ✅ OBRIGATÓRIO: usar ANON_KEY, não SERVICE_ROLE_KEY
+      {
+        global: {
+          headers: {
+            Authorization: authHeader, // ✅ OBRIGATÓRIO: repassar header Authorization
+          },
         },
-      },
-      auth: {
-        persistSession: false,
-      },
-    });
+        auth: {
+          persistSession: false,
+        },
+      }
+    );
 
     console.log("🔐 Tentando validar usuário com token...");
     
     // Verificar se o usuário está autenticado
     const { data: { user }, error: userError } = await supabaseClient.auth.getUser();
+    
+    // ✅ TESTE DEFINITIVO: Log após getUser()
+    console.log("👤 USER:", user ? { id: user.id, email: user.email } : null);
+    console.log("❌ AUTH ERROR:", userError ? {
+      message: userError.message,
+      name: userError.name,
+      status: userError.status,
+    } : null);
     
     console.log("👤 Resultado da validação:", {
       hasUser: !!user,
@@ -130,6 +143,7 @@ serve(async (req: Request) => {
       );
     }
 
+    // 🔥 SE CHEGOU AQUI, AUTH ESTÁ OK
     console.log("✅ Usuário autenticado:", user.id);
 
     const body = await req.json();
