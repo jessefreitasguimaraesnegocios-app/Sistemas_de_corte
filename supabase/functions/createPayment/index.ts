@@ -9,18 +9,16 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ⚠️ MP_SPONSOR_ID_LOJA NÃO deve ser secret - vem do banco (business.mp_user_id)
 const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 
-// Configurações do Supabase
-// ✅ Usamos apenas SERVICE_ROLE_KEY para acessar o banco (não precisa de ANON_KEY)
-const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || 
-                     Deno.env.get("SUPABASE_PROJECT_URL") || 
-                     "";
+// ✅ Configurações do Supabase - OBRIGATÓRIAS
+// GARANTIR que esses dois existem em: Supabase → Edge Functions → Secrets
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL") || "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
 
 serve(async (req: Request) => {
   // CORS headers
   const corsHeaders = {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+    "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-signature, x-request-id",
     "Content-Type": "application/json",
   };
 
@@ -29,7 +27,23 @@ serve(async (req: Request) => {
     return new Response("ok", { headers: corsHeaders });
   }
 
+  // 🔥 LOG CRÍTICO - Se aparecer nos logs do Supabase, a função ESTÁ sendo executada
+  console.log("🔥🔥🔥 createPayment EXECUTADA - Se você vê isso, o gateway NÃO bloqueou");
+  console.log("🔥🔥🔥 Timestamp:", new Date().toISOString());
+  console.log("🔥🔥🔥 Method:", req.method);
+  console.log("🔥🔥🔥 URL:", req.url);
+
   try {
+    // #region agent log
+    const allHeaders: Record<string, string> = {};
+    req.headers.forEach((value, key) => {
+      allHeaders[key] = key.toLowerCase().includes('authorization') || key.toLowerCase() === 'apikey' 
+        ? `${value.substring(0, 20)}...` 
+        : value;
+    });
+    await fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'createPayment/index.ts:19',message:'HYP-D: Função EXECUTADA - headers recebidos',data:{method:req.method,url:req.url,headers:allHeaders,hasApikey:req.headers.has('apikey'),hasAuthorization:req.headers.has('authorization')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
+    // #endregion
+    
     // 🔥 FUNÇÃO PÚBLICA - CHECKOUT NÃO REQUER AUTENTICAÇÃO DE USUÁRIO
     // ✅ REGRA DE OURO: Pagamento pode ser feito por cliente anônimo
     // - PIX pode ser gerado sem login (QR Code público, link, mesa, PWA)
@@ -46,7 +60,14 @@ serve(async (req: Request) => {
     console.log("🔥 createPayment chamada (pública - sem auth de usuário)");
     console.log("📋 Método:", req.method);
     console.log("📋 URL:", req.url);
+    console.log("📋 Headers recebidos:", Object.fromEntries(req.headers.entries()));
+    console.log("📋 Has apikey header:", req.headers.has('apikey'));
+    console.log("📋 Has authorization header:", req.headers.has('authorization'));
 
+    // #region agent log
+    await fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'createPayment/index.ts:50',message:'HYP-A: Verificando configs do Supabase',data:{hasSupabaseUrl:!!SUPABASE_URL,hasServiceKey:!!SUPABASE_SERVICE_ROLE_KEY,urlLength:SUPABASE_URL?.length,serviceKeyLength:SUPABASE_SERVICE_ROLE_KEY?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+    // #endregion
+    
     // ✅ VALIDAR CONFIGURAÇÕES DO SUPABASE
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
       console.error("❌ Configuração do Supabase incompleta", {
@@ -66,7 +87,22 @@ serve(async (req: Request) => {
     }
 
     // ✅ LER BODY DA REQUISIÇÃO
-    const body = await req.json();
+    let body: any;
+    try {
+      const bodyText = await req.text();
+      console.log("📦 Body RAW recebido:", bodyText.substring(0, 500));
+      body = JSON.parse(bodyText);
+    } catch (parseError: any) {
+      console.error("❌ Erro ao parsear body:", parseError);
+      return new Response(
+        JSON.stringify({ 
+          error: "Body inválido. JSON malformado.",
+          details: parseError.message 
+        }),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+    
     const {
       valor,
       metodo_pagamento,
@@ -76,32 +112,48 @@ serve(async (req: Request) => {
       business_id,
     } = body;
 
-    console.log("📦 Dados recebidos:", {
+    console.log("📦 Dados recebidos (parseados):", {
       valor,
       metodo_pagamento,
       email_cliente,
       business_id,
       hasTokenCartao: !!token_cartao,
+      valorType: typeof valor,
+      businessIdType: typeof business_id,
     });
 
     // ✅ VALIDAR PARÂMETROS
+    console.log("🔍 Validando parâmetros:", {
+      valor,
+      valorType: typeof valor,
+      valorIsNumber: typeof valor === 'number',
+      email_cliente,
+      emailType: typeof email_cliente,
+      business_id,
+      businessIdType: typeof business_id,
+      metodo_pagamento,
+    });
+    
     if (!valor || valor <= 0) {
+      console.error("❌ Validação falhou: valor inválido", { valor, valorType: typeof valor });
       return new Response(
-        JSON.stringify({ error: "Valor inválido. O valor deve ser maior que zero." }),
+        JSON.stringify({ error: "Valor inválido. O valor deve ser maior que zero.", details: `Recebido: ${valor} (tipo: ${typeof valor})` }),
         { status: 400, headers: corsHeaders }
       );
     }
 
     if (!email_cliente || !email_cliente.includes("@")) {
+      console.error("❌ Validação falhou: email inválido", { email_cliente, emailType: typeof email_cliente });
       return new Response(
-        JSON.stringify({ error: "Email do cliente inválido." }),
+        JSON.stringify({ error: "Email do cliente inválido.", details: `Recebido: ${email_cliente}` }),
         { status: 400, headers: corsHeaders }
       );
     }
 
     if (!business_id) {
+      console.error("❌ Validação falhou: business_id ausente", { business_id, businessIdType: typeof business_id });
       return new Response(
-        JSON.stringify({ error: "ID do estabelecimento é obrigatório." }),
+        JSON.stringify({ error: "ID do estabelecimento é obrigatório.", details: `Recebido: ${business_id}` }),
         { status: 400, headers: corsHeaders }
       );
     }
@@ -232,48 +284,77 @@ serve(async (req: Request) => {
       sponsorId: SPONSOR_ID_BUSINESS,
       businessId: business_id,
     });
+    console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
+    console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
 
     // ✅ CHAMAR API MERCADO PAGO
-    const mpResponse = await fetch("https://api.mercadopago.com/v1/orders", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
-        "Content-Type": "application/json",
-        "X-Idempotency-Key": idempotencyKey,
-      },
-      body: JSON.stringify(orderData),
-    });
-
-    const mpResponseText = await mpResponse.text();
+    let mpResponse: Response;
+    let mpResponseText: string;
     let mpData: any;
     
     try {
-      mpData = JSON.parse(mpResponseText);
-    } catch (e) {
-      console.error("❌ Erro ao parsear resposta do Mercado Pago:", mpResponseText);
+      mpResponse = await fetch("https://api.mercadopago.com/v1/orders", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
+          "Content-Type": "application/json",
+          "X-Idempotency-Key": idempotencyKey,
+        },
+        body: JSON.stringify(orderData),
+      });
+
+      mpResponseText = await mpResponse.text();
+      console.log("📥 Resposta RAW do Mercado Pago:", mpResponseText.substring(0, 500));
+      
+      try {
+        mpData = JSON.parse(mpResponseText);
+      } catch (e) {
+        console.error("❌ Erro ao parsear resposta do Mercado Pago:", mpResponseText);
+        return new Response(
+          JSON.stringify({ 
+            error: "Erro ao processar resposta do Mercado Pago.",
+            details: mpResponseText.substring(0, 200)
+          }),
+          { status: 500, headers: corsHeaders }
+        );
+      }
+
+      console.log("📥 Resposta Mercado Pago (parseada):", {
+        status: mpResponse.status,
+        statusText: mpResponse.statusText,
+        hasData: !!mpData,
+        mpDataKeys: Object.keys(mpData || {}),
+        mpError: mpData?.error,
+        mpMessage: mpData?.message,
+      });
+
+      if (!mpResponse.ok) {
+        console.error("❌ Erro na API Mercado Pago:", {
+          status: mpResponse.status,
+          statusText: mpResponse.statusText,
+          mpData: mpData,
+          mpError: mpData?.error,
+          mpMessage: mpData?.message,
+          mpCause: mpData?.cause,
+        });
+        return new Response(
+          JSON.stringify({ 
+            error: "Erro ao processar pagamento no Mercado Pago.",
+            details: mpData?.message || mpData?.error || mpData?.cause?.[0]?.description || "Erro desconhecido",
+            mpStatus: mpResponse.status,
+            mpData: mpData
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+    } catch (fetchError: any) {
+      console.error("❌ Erro ao fazer fetch para Mercado Pago:", fetchError);
       return new Response(
         JSON.stringify({ 
-          error: "Erro ao processar resposta do Mercado Pago.",
-          details: mpResponseText.substring(0, 200)
+          error: "Erro ao conectar com Mercado Pago.",
+          details: fetchError.message || fetchError.toString()
         }),
         { status: 500, headers: corsHeaders }
-      );
-    }
-
-    console.log("📥 Resposta Mercado Pago:", {
-      status: mpResponse.status,
-      statusText: mpResponse.statusText,
-      hasData: !!mpData,
-    });
-
-    if (!mpResponse.ok) {
-      console.error("❌ Erro na API Mercado Pago:", mpData);
-      return new Response(
-        JSON.stringify({ 
-          error: "Erro ao processar pagamento no Mercado Pago.",
-          details: mpData.message || mpData.error || "Erro desconhecido"
-        }),
-        { status: mpResponse.status, headers: corsHeaders }
       );
     }
 

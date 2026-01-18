@@ -1,6 +1,10 @@
-[project]
-
 [functions.createPayment]
+verify_jwt = false
+
+[functions.mp-oauth-callback]
+verify_jwt = false
+
+[functions.mercadopago-webhook]
 verify_jwt = false
 
 [functions.checkPaymentStatus]

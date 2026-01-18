@@ -65,6 +65,10 @@ export async function criarPagamentoPix(
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     const functionUrl = `${supabaseUrl}/functions/v1/createPayment`;
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'paymentService.ts:64',message:'HYP-C: Verificando variáveis de ambiente',data:{hasSupabaseUrl:!!supabaseUrl,hasAnonKey:!!supabaseAnonKey,urlLength:supabaseUrl?.length,anonKeyLength:supabaseAnonKey?.length,anonKeyPreview:supabaseAnonKey?.substring(0,20)+'...'},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'C'})}).catch(()=>{});
+    // #endregion
+    
     console.log('📤 Chamando createPayment Edge Function (PIX) - função pública...', {
       url: functionUrl,
       businessId,
@@ -79,10 +83,24 @@ export async function criarPagamentoPix(
       referencia_externa: `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     };
     
+    // #region agent log
+    fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'paymentService.ts:74',message:'HYP-B: Headers antes do fetch',data:{functionUrl,hasAnonKey:!!supabaseAnonKey,anonKeyLength:supabaseAnonKey?.length,requestBodyKeys:Object.keys(requestBody)},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'B'})}).catch(()=>{});
+    // #endregion
+    
     let responseData: any = null;
     let responseError: any = null;
     
     try {
+      // 🔍 DEBUG CRÍTICO - Logar exatamente o que está sendo enviado
+      console.log('🔍 DEBUG - Headers sendo enviados:', {
+        'Content-Type': 'application/json',
+        'apikey': supabaseAnonKey ? `${supabaseAnonKey.substring(0, 30)}...` : 'MISSING',
+        'apikey-length': supabaseAnonKey?.length,
+        'apikey-starts-with': supabaseAnonKey?.substring(0, 10),
+      });
+      console.log('🔍 DEBUG - URL completa:', functionUrl);
+      console.log('🔍 DEBUG - Body sendo enviado:', requestBody);
+      
       // ✅ FAZER FETCH DIRETO - SEM HEADER DE AUTENTICAÇÃO (função é pública)
       const response = await fetch(functionUrl, {
         method: 'POST',
@@ -92,6 +110,10 @@ export async function criarPagamentoPix(
         },
         body: JSON.stringify(requestBody),
       });
+      
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'paymentService.ts:87',message:'HYP-A/D/E: Resposta recebida',data:{status:response.status,statusText:response.statusText,ok:response.ok,headers:Object.fromEntries(response.headers.entries())},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
+      // #endregion
       
       // Processar resposta
       const responseText = await response.text();

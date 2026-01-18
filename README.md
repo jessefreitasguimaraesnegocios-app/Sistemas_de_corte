@@ -1,73 +1,62 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 🚀 Sistemas de Corte - Sistema de Gestão Multi-Tenant
 
-# Run and deploy your AI Studio app
+Sistema SaaS completo para gestão de estabelecimentos de beleza com integração Mercado Pago.
 
-This contains everything you need to run your app locally.
+## ⚡ Quick Start
 
-View your app in AI Studio: https://ai.studio/apps/drive/1t4uN-KT1oTDr9u0AxrF7NMAoO5QLmW3Z
+```bash
+# 1. Instalar dependências
+npm install
 
-## Run Locally
+# 2. Configurar variáveis de ambiente
+cp .env.example .env.local
+# Edite .env.local com suas credenciais
 
-**Prerequisites:**  Node.js
+# 3. Deploy das Edge Functions
+npx supabase functions deploy
 
-1. Install dependencies:
-   ```bash
-   npm install
-   ```
+# 4. Rodar localmente
+npm run dev
+```
 
-2. Configure environment variables:
-   - Copy `.env.example` to `.env.local`
-   - Fill in your Supabase credentials:
-     - `VITE_SUPABASE_URL`: Your Supabase project URL
-     - `VITE_SUPABASE_ANON_KEY`: Your Supabase anonymous key
-   - (Optional) Set `GEMINI_API_KEY` for AI features
+## 📚 Documentação
 
-3. Configure Supabase Edge Functions:
-   - Go to your Supabase Dashboard → Edge Functions → Settings
-   - Add the following secrets:
-     - `MP_ACCESS_TOKEN_VENDEDOR`: Your Mercado Pago access token (vendor account)
-     - `MP_SPONSOR_ID_LOJA`: Your Mercado Pago sponsor ID
-     - `MP_WEBHOOK_URL`: (Optional) Webhook URL for payment notifications
+- **[SETUP.md](./SETUP.md)** - Guia completo de configuração
+- **[TROUBLESHOOTING.md](./TROUBLESHOOTING.md)** - Problemas comuns e soluções
+- **[EDGE_FUNCTIONS.md](./EDGE_FUNCTIONS.md)** - Documentação das Edge Functions
+- **[MERCADO_PAGO.md](./MERCADO_PAGO.md)** - Integração Mercado Pago
 
-4. Deploy the Edge Function:
-   ```bash
-   # Install Supabase CLI if not already installed
-   npm install -g supabase
-   
-   # Login to Supabase
-   supabase login
-   
-   # Link your project
-   supabase link --project-ref your-project-ref
-   
-   # Deploy the function
-   supabase functions deploy createPayment
-   ```
+## 🏗️ Stack
 
-5. Run the app:
-   ```bash
-   npm run dev
-   ```
+- **Frontend**: React 19 + TypeScript + Vite
+- **Backend**: Supabase (PostgreSQL + Edge Functions)
+- **Pagamentos**: Mercado Pago (PIX + Cartão)
+- **Auth**: Supabase Auth + Google OAuth
+- **Deploy**: Vercel (Frontend) + Supabase (Backend)
 
-## Payment Integration
+## 💳 Features
 
-This app includes Mercado Pago payment integration with automatic split (10% platform fee).
+- ✅ Pagamentos PIX e Cartão com split automático (10%)
+- ✅ Multi-tenant (isolamento por business)
+- ✅ OAuth Mercado Pago por estabelecimento
+- ✅ Webhooks assinados para notificações
+- ✅ Gestão completa (produtos, serviços, colaboradores)
 
-### Features:
-- **PIX Payments**: Generate QR codes for instant payments
-- **Credit Card Payments**: Secure card processing with tokenization
-- **Automatic Split**: 10% fee automatically applied to platform
-- **Transaction Tracking**: All payments saved to Supabase database
+## 🔐 Variáveis de Ambiente
 
-### Setup Mercado Pago:
-1. Create a Mercado Pago account
-2. Get your access token from the dashboard
-3. Set up split payments (sponsor_id)
-4. Configure the secrets in Supabase Edge Functions
+```env
+VITE_SUPABASE_URL=https://seu-projeto.supabase.co
+VITE_SUPABASE_ANON_KEY=sua-chave-anon-key
+VITE_GEMINI_API_KEY=sua-chave-gemini (opcional)
+```
 
-### Important Notes:
-- The credit card implementation uses a mock token for demonstration
-- For production, integrate the official Mercado Pago SDK for secure tokenization
-- Install: `npm install @mercadopago/sdk-react` and update `CheckoutModal.tsx`
+## 📖 Próximos Passos
+
+1. Leia [SETUP.md](./SETUP.md) para configuração completa
+2. Configure os secrets no Supabase Dashboard
+3. Conecte estabelecimentos ao Mercado Pago via OAuth
+4. Teste pagamentos PIX e Cartão
+
+---
+
+**Problemas?** Consulte [TROUBLESHOOTING.md](./TROUBLESHOOTING.md)
