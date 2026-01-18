@@ -402,63 +402,43 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     }
 
     try {
-      // Obter token de autenticação para chamar Edge Function
-      const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
-      const accessToken = sessionData?.session?.access_token;
-
-      if (sessionError || !accessToken) {
-        // Tentar refresh silencioso antes de mostrar erro
-        try {
-          const { data: refreshData } = await supabase.auth.refreshSession();
-          if (refreshData?.session?.access_token) {
-            // Se conseguiu refreshar, usar o novo token
-            accessToken = refreshData.session.access_token;
-          } else {
-            console.error('❌ Sem sessão/Access Token para chamar getMpOauthUrl:', sessionError);
-            addToast('Sessão expirada. Faça login novamente.', 'error');
-            return;
-          }
-        } catch (refreshError) {
-          console.error('❌ Erro ao refreshar sessão:', refreshError);
-          addToast('Sessão expirada. Faça login novamente.', 'error');
-          return;
-        }
-      }
-
       // Construir redirect URI dinamicamente baseado na URL atual
       const redirectUri = `${window.location.origin}/oauth/callback`;
       
-      console.log('🔐 Chamando getMpOauthUrl com token:', {
+      console.log('🔐 Chamando getMpOauthUrl:', {
         businessId: business.id,
-        hasToken: !!accessToken,
-        tokenLength: accessToken?.length,
         redirectUri,
+        supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
       });
 
-      // Chamar Edge Function para obter URL de OAuth
-      // Passar redirect_uri dinamicamente para evitar problemas com URLs diferentes (dev/prod)
-      // ✅ FUNÇÃO É PÚBLICA (--no-verify-jwt) - não precisa de token
-      const { data, error } = await supabase.functions.invoke('getMpOauthUrl', {
-        body: { 
-          business_id: business.id,
-          redirect_uri: redirectUri // URL dinâmica do frontend
+      // ✅ FUNÇÃO É PÚBLICA (verify_jwt = false) - usar fetch direto
+      const functionUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/getMpOauthUrl`;
+      
+      const response = await fetch(functionUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY || '',
         },
-        // Não enviar Authorization - função é pública
+        body: JSON.stringify({
+          business_id: business.id,
+          redirect_uri: redirectUri, // URL dinâmica do frontend
+        }),
       });
 
-      if (error) {
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({ error: 'Erro desconhecido' }));
         console.error('❌ Erro ao obter URL OAuth:', {
-          error,
-          message: error.message,
-          context: error.context,
-          status: error.status,
+          status: response.status,
+          statusText: response.statusText,
+          error: errorData,
         });
         
         // Mensagem mais específica baseada no erro
         let errorMessage = 'Erro ao conectar ao Mercado Pago. Verifique a configuração.';
-        if (error.message?.includes('401') || error.status === 401) {
-          errorMessage = 'Erro de autenticação. Faça login novamente.';
-        } else if (error.message?.includes('MP_CLIENT_ID') || error.message?.includes('MP_REDIRECT_URI')) {
+        if (response.status === 401) {
+          errorMessage = 'Erro de autenticação. Verifique as configurações.';
+        } else if (errorData.error?.includes('MP_CLIENT_ID') || errorData.error?.includes('MP_REDIRECT_URI')) {
           errorMessage = 'Configuração do Mercado Pago incompleta. Contate o suporte.';
         }
         
@@ -466,6 +446,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         return;
       }
 
+      const data = await response.json();
+      
       // Verificar se temos a URL (pode vir como 'url' ou 'oauth_url')
       const oauthUrl = data?.url || data?.oauth_url;
       
@@ -477,6 +459,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
       console.log('✅ URL OAuth recebida com sucesso!');
       console.log('✅ Redirecionando para:', oauthUrl);
+      console.log('⚠️ IMPORTANTE: Certifique-se de que o redirect_uri está cadastrado no painel do Mercado Pago:', redirectUri);
       
       // ✅ Salvar aba atual para restaurar após OAuth
       // O botão está na aba SETTINGS, então salvamos isso
