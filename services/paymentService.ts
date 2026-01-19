@@ -4,10 +4,12 @@ import { PaymentRequest, PixPaymentResponse, CreditCardPaymentResponse } from '.
 /**
  * Verifica o status de um pagamento PIX
  * @param paymentId ID do pagamento retornado pelo Mercado Pago
+ * @param businessId ID do business (opcional, para consulta direta na API do MP)
  * @returns Status do pagamento
  */
 export async function verificarStatusPagamento(
-  paymentId: string | number
+  paymentId: string | number,
+  businessId?: string
 ): Promise<{ status: string; approved: boolean }> {
   try {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
@@ -21,7 +23,7 @@ export async function verificarStatusPagamento(
         'apikey': supabaseAnonKey,
         'Authorization': `Bearer ${supabaseAnonKey}`,
       },
-      body: JSON.stringify({ payment_id: paymentId }),
+      body: JSON.stringify({ payment_id: paymentId, business_id: businessId }),
     });
 
     if (!response.ok) {

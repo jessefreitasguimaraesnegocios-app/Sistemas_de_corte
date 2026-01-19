@@ -173,8 +173,8 @@ export default function CheckoutModal({
 
     const checkPaymentStatus = async () => {
       try {
-        console.log('🔄 Verificando status do pagamento:', pixData.payment_id);
-        const result = await verificarStatusPagamento(pixData.payment_id);
+        console.log('🔄 Verificando status do pagamento:', pixData.payment_id, 'businessId:', businessId);
+        const result = await verificarStatusPagamento(pixData.payment_id, businessId);
         console.log('📊 Resultado da verificação:', result);
 
         if (result.approved) {
