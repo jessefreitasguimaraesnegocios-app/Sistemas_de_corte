@@ -48,10 +48,37 @@ export default function CheckoutModal({
   const cardNumberRef = useRef<any>(null);
   const securityCodeRef = useRef<any>(null);
   const expirationDateRef = useRef<any>(null);
+  
+  // Taxa de split (buscar do business)
+  const [splitPercentage, setSplitPercentage] = useState<number>(10); // Default 10%
 
-  // Calcula taxa de 10%
-  const applicationFee = total * 0.1;
+  // Calcula taxa baseada no split do business
+  const applicationFee = total * (splitPercentage / 100);
   const totalWithFee = total;
+
+  // Buscar taxa de split do business quando o modal abrir
+  useEffect(() => {
+    if (isOpen && businessId) {
+      const fetchBusinessSplit = async () => {
+        try {
+          const { data: businessData, error: businessError } = await supabase
+            .from('businesses')
+            .select('revenue_split')
+            .eq('id', businessId)
+            .single();
+          
+          if (!businessError && businessData?.revenue_split) {
+            setSplitPercentage(Number(businessData.revenue_split));
+            console.log('📊 Taxa de split do business:', businessData.revenue_split + '%');
+          }
+        } catch (error) {
+          console.error('Erro ao buscar taxa de split:', error);
+        }
+      };
+      
+      fetchBusinessSplit();
+    }
+  }, [isOpen, businessId]);
 
   // Buscar public key do Mercado Pago quando o modal abrir e estiver na aba de cartão
   useEffect(() => {
@@ -136,6 +163,7 @@ export default function CheckoutModal({
       setPaymentStatus(null);
       setMpPublicKey(null);
       setMpInitialized(false);
+      setSplitPercentage(10); // Reset para default
     }
   }, [isOpen]);
 
@@ -574,7 +602,7 @@ export default function CheckoutModal({
               <span className="text-3xl font-black text-slate-900">R$ {total.toFixed(2)}</span>
             </div>
             <div className="flex justify-between items-center mt-2 text-sm text-slate-500">
-              <span>Taxa da plataforma (10%)</span>
+              <span>Taxa da plataforma ({splitPercentage}%)</span>
               <span>R$ {applicationFee.toFixed(2)}</span>
             </div>
           </div>
