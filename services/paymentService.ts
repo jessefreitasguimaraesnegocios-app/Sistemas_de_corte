@@ -19,6 +19,7 @@ export async function verificarStatusPagamento(
       headers: {
         'Content-Type': 'application/json',
         'apikey': supabaseAnonKey,
+        'Authorization': `Bearer ${supabaseAnonKey}`,
       },
       body: JSON.stringify({ payment_id: paymentId }),
     });
