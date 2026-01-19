@@ -100,16 +100,17 @@ export interface PixPaymentResponse {
   qr_code_base64?: string;
   qr_code?: string;
   txid: string;
-  payment_id: number;
+  payment_id: string | number; // API Orders retorna string (ex: "PAY01KF9...")
   status: string;
   application_fee: number;
   error?: string;
   details?: any;
+  ticket_url?: string; // URL do ticket de pagamento
 }
 
 export interface CreditCardPaymentResponse {
   success: boolean;
-  payment_id: number;
+  payment_id: string | number; // API Orders retorna string
   status: string;
   status_detail: string;
   application_fee: number;

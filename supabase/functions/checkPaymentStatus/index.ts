@@ -35,74 +35,58 @@ serve(async (req: Request) => {
       );
     }
 
-    // Buscar business para obter o access token
+    console.log("🔍 Verificando status do pagamento:", payment_id);
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    // Buscar transação no banco para obter o business_id
+    // ✅ Buscar status diretamente do banco (atualizado pelo webhook)
+    // O payment_id da API Orders é uma string como "PAY01KF9VF7N5RRBF1FCC6KS40X6E"
     const { data: transaction, error: transError } = await supabase
       .from("transactions")
-      .select("business_id")
+      .select("status, payment_id")
       .eq("payment_id", payment_id.toString())
       .single();
 
     if (transError || !transaction) {
-      // Se não encontrar no banco, tentar buscar diretamente no MP (requer access token)
-      // Por enquanto, retornar erro
-      return new Response(
-        JSON.stringify({ error: "Transação não encontrada" }),
-        { 
-          status: 404, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        }
-      );
-    }
-
-    // Buscar business para obter access token
-    const { data: business, error: businessError } = await supabase
-      .from("businesses")
-      .select("mp_access_token")
-      .eq("id", transaction.business_id)
-      .single();
-
-    if (businessError || !business?.mp_access_token) {
-      return new Response(
-        JSON.stringify({ error: "Business não encontrado ou sem token configurado" }),
-        { 
-          status: 404, 
-          headers: { ...corsHeaders, "Content-Type": "application/json" } 
-        }
-      );
-    }
-
-    // Verificar status no Mercado Pago
-    const mp_response = await fetch(`https://api.mercadopago.com/v1/payments/${payment_id}`, {
-      method: "GET",
-      headers: {
-        "Authorization": `Bearer ${business.mp_access_token}`,
-        "Content-Type": "application/json",
-      },
-    });
-
-    const mp_result = await mp_response.json();
-
-    if (!mp_response.ok) {
+      console.warn("⚠️ Transação não encontrada para payment_id:", payment_id);
+      // Retornar pending se não encontrar (pode estar sendo processado)
       return new Response(
         JSON.stringify({ 
-          error: mp_result.message || "Erro ao verificar status no Mercado Pago",
-          status: "error"
-        }), 
-        {
-          status: mp_response.status,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
+          status: "pending",
+          approved: false,
+          payment_id: payment_id,
+          message: "Aguardando confirmação do pagamento"
+        }),
+        { 
+          headers: { ...corsHeaders, "Content-Type": "application/json" } 
         }
       );
     }
+
+    console.log("✅ Transação encontrada:", transaction);
+
+    // Mapear status do banco para status do Mercado Pago
+    // No banco: PENDING, PAID, CANCELLED, etc.
+    // No MP: pending, approved, rejected, etc.
+    const statusMap: Record<string, string> = {
+      'PENDING': 'pending',
+      'PAID': 'approved',
+      'APPROVED': 'approved',
+      'CANCELLED': 'cancelled',
+      'REJECTED': 'rejected',
+      'REFUNDED': 'refunded',
+    };
+
+    const mpStatus = statusMap[transaction.status?.toUpperCase()] || transaction.status?.toLowerCase() || 'pending';
+    const isApproved = mpStatus === 'approved' || transaction.status?.toUpperCase() === 'PAID';
+
+    console.log("📊 Status final:", { dbStatus: transaction.status, mpStatus, isApproved });
 
     return new Response(
       JSON.stringify({
-        status: mp_result.status,
-        approved: mp_result.status === "approved",
-        payment_id: mp_result.id,
+        status: mpStatus,
+        approved: isApproved,
+        payment_id: transaction.payment_id,
       }),
       { 
         headers: { ...corsHeaders, "Content-Type": "application/json" } 
