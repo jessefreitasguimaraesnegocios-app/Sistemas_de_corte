@@ -145,9 +145,12 @@ export default function CheckoutModal({
 
     const checkPaymentStatus = async () => {
       try {
+        console.log('🔄 Verificando status do pagamento:', pixData.payment_id);
         const result = await verificarStatusPagamento(pixData.payment_id);
+        console.log('📊 Resultado da verificação:', result);
 
         if (result.approved) {
+          console.log('✅ Pagamento aprovado! Fechando modal...');
           setPaymentStatus('approved');
           setCheckingPayment(false);
           setTimeout(() => {
@@ -155,9 +158,12 @@ export default function CheckoutModal({
             onClose();
           }, 2000);
         } else if (result.status === 'rejected' || result.status === 'cancelled' || result.status === 'error') {
+          console.log('❌ Pagamento rejeitado/cancelado:', result.status);
           setPaymentStatus('rejected');
           setCheckingPayment(false);
           setError('Pagamento rejeitado ou cancelado. Tente novamente.');
+        } else {
+          console.log('⏳ Pagamento ainda pendente:', result.status);
         }
       } catch (err) {
         console.error('Erro ao verificar status do pagamento:', err);
@@ -165,7 +171,7 @@ export default function CheckoutModal({
       }
     };
 
-    if (pixData && !checkingPayment && paymentStatus === null) {
+    if (pixData && !checkingPayment && (paymentStatus === null || paymentStatus === 'pending')) {
       setCheckingPayment(true);
       // Verificar imediatamente e depois a cada 3 segundos
       checkPaymentStatus();
