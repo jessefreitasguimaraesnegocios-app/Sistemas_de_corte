@@ -61,17 +61,43 @@ export default function OAuthCallback() {
         }, 30000); // 30 segundos
 
         // Chamar a Edge Function do Supabase para processar o OAuth
-        // IMPORTANTE: A função agora é pública (--no-verify-jwt) porque o Mercado Pago não envia token
-        const invokePromise = supabase.functions.invoke('mp-oauth-callback', {
-          body: {
+        // Usando fetch direto para garantir headers corretos
+        const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+        const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
+        const functionUrl = `${supabaseUrl}/functions/v1/mp-oauth-callback`;
+
+        const response = await fetch(functionUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': supabaseAnonKey,
+            'Authorization': `Bearer ${supabaseAnonKey}`,
+          },
+          body: JSON.stringify({
             code,
             state,
             redirect_uri: redirectUri // Mesmo redirect_uri usado na URL de autorização
-          }
+          }),
         });
 
-        // Aguardar resposta com timeout
-        const { data, error } = await invokePromise;
+        // Parsear resposta
+        let data = null;
+        let error = null;
+        
+        try {
+          data = await response.json();
+        } catch (e) {
+          console.error('Erro ao parsear resposta:', e);
+        }
+
+        if (!response.ok) {
+          error = {
+            message: data?.error || `Erro ${response.status}: ${response.statusText}`,
+            name: 'FunctionsHttpError',
+            context: response,
+            details: data
+          };
+        }
 
         // Limpar timeout se chegou aqui
         if (timeoutId) {
