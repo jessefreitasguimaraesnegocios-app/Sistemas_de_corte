@@ -83,9 +83,16 @@ serve(async (req: Request) => {
     console.log("✅ Usando redirect_uri:", finalRedirectUri);
 
     // Construir URL de OAuth do Mercado Pago
-    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(MP_CLIENT_ID)}&redirect_uri=${encodeURIComponent(finalRedirectUri)}&state=${encodeURIComponent(business_id)}&platform_id=mp&prompt=login`;
+    // 🔥 IMPORTANTE: O scope define as permissões que o marketplace precisa
+    // - read: ler dados do vendedor
+    // - write: criar pagamentos em nome do vendedor  
+    // - offline_access: manter acesso mesmo quando vendedor não está logado
+    // Sem esses scopes, o split NÃO funciona!
+    const scopes = "read,write,offline_access";
+    
+    const oauthUrl = `https://auth.mercadopago.com/authorization?response_type=code&client_id=${encodeURIComponent(MP_CLIENT_ID)}&redirect_uri=${encodeURIComponent(finalRedirectUri)}&state=${encodeURIComponent(business_id)}&platform_id=mp&prompt=login&scope=${encodeURIComponent(scopes)}`;
 
-    console.log("✅ URL OAuth gerada com sucesso");
+    console.log("✅ URL OAuth gerada com sucesso (com scopes para split)");
 
     return new Response(
       JSON.stringify({
