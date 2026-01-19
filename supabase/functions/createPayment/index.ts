@@ -6,7 +6,9 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 // Configurações do Mercado Pago
-// ⚠️ MP_SPONSOR_ID_LOJA NÃO deve ser secret - vem do banco (business.mp_user_id)
+// ✅ MP_SPONSOR_ID = User ID da conta da PLATAFORMA (marketplace) que recebe a comissão
+// Este é o User ID da conta dona da aplicação sistemasplit, NÃO do vendedor
+const MP_SPONSOR_ID = Deno.env.get("MP_SPONSOR_ID") || "";
 const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
 
 // ✅ Configurações do Supabase - OBRIGATÓRIAS
@@ -215,18 +217,22 @@ serve(async (req: Request) => {
     const COMISSAO_PERCENTUAL = business.revenue_split || 10;
     const marketplace_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
 
-    // ✅ OBTER SPONSOR_ID DO BANCO (mp_user_id do business)
-    // Cada business tem seu próprio mp_user_id (obtido via OAuth)
-    // NÃO usar secret global - isso quebraria o marketplace
-    const SPONSOR_ID_BUSINESS = business.mp_user_id;
+    // ✅ SPONSOR_ID = User ID da PLATAFORMA (marketplace), não do vendedor
+    // No modelo marketplace do Mercado Pago:
+    // - Vendedor: usa seu access_token para criar o pagamento (business.mp_access_token)
+    // - Sponsor: é a plataforma que recebe a comissão (MP_SPONSOR_ID - secret global)
+    // 
+    // O mp_user_id do business é o ID do VENDEDOR, não deve ser usado como sponsor
+    // O sponsor deve ser o User ID da conta dona da aplicação (sistemasplit)
     
-    if (!SPONSOR_ID_BUSINESS) {
+    if (!MP_SPONSOR_ID) {
+      console.error("❌ MP_SPONSOR_ID não configurado nos secrets");
       return new Response(
         JSON.stringify({ 
-          error: "Estabelecimento não possui User ID do Mercado Pago configurado.",
-          hint: "Conecte o estabelecimento ao Mercado Pago via OAuth primeiro."
+          error: "Configuração do marketplace incompleta.",
+          hint: "Configure o secret MP_SPONSOR_ID com o User ID da conta da plataforma."
         }),
-        { status: 400, headers: corsHeaders }
+        { status: 500, headers: corsHeaders }
       );
     }
 
@@ -246,7 +252,7 @@ serve(async (req: Request) => {
       },
       integration_data: {
         sponsor: {
-          id: String(SPONSOR_ID_BUSINESS) // mp_user_id do business (obtido via OAuth)
+          id: String(MP_SPONSOR_ID) // User ID da PLATAFORMA (conta dona da aplicação)
         }
       }
     };
@@ -282,8 +288,9 @@ serve(async (req: Request) => {
       valorTotal: valor,
       comissaoPercentual: COMISSAO_PERCENTUAL,
       marketplaceFee: marketplace_fee,
-      sponsorId: SPONSOR_ID_BUSINESS,
+      sponsorId: MP_SPONSOR_ID, // User ID da plataforma
       businessId: business_id,
+      businessMpUserId: business.mp_user_id, // User ID do vendedor (para referência)
     });
     console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
     console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
