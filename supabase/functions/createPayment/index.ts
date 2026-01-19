@@ -37,16 +37,6 @@ serve(async (req: Request) => {
   console.log("🔥🔥🔥 URL:", req.url);
 
   try {
-    // #region agent log
-    const allHeaders: Record<string, string> = {};
-    req.headers.forEach((value, key) => {
-      allHeaders[key] = key.toLowerCase().includes('authorization') || key.toLowerCase() === 'apikey' 
-        ? `${value.substring(0, 20)}...` 
-        : value;
-    });
-    await fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'createPayment/index.ts:19',message:'HYP-D: Função EXECUTADA - headers recebidos',data:{method:req.method,url:req.url,headers:allHeaders,hasApikey:req.headers.has('apikey'),hasAuthorization:req.headers.has('authorization')},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'D'})}).catch(()=>{});
-    // #endregion
-    
     // 🔥 FUNÇÃO PÚBLICA - CHECKOUT NÃO REQUER AUTENTICAÇÃO DE USUÁRIO
     // ✅ REGRA DE OURO: Pagamento pode ser feito por cliente anônimo
     // - PIX pode ser gerado sem login (QR Code público, link, mesa, PWA)
@@ -66,10 +56,6 @@ serve(async (req: Request) => {
     console.log("📋 Headers recebidos:", Object.fromEntries(req.headers.entries()));
     console.log("📋 Has apikey header:", req.headers.has('apikey'));
     console.log("📋 Has authorization header:", req.headers.has('authorization'));
-
-    // #region agent log
-    await fetch('http://127.0.0.1:7242/ingest/ea370a6f-3bf4-49b1-acb3-6c775b154e3a',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'createPayment/index.ts:50',message:'HYP-A: Verificando configs do Supabase',data:{hasSupabaseUrl:!!SUPABASE_URL,hasServiceKey:!!SUPABASE_SERVICE_ROLE_KEY,urlLength:SUPABASE_URL?.length,serviceKeyLength:SUPABASE_SERVICE_ROLE_KEY?.length},timestamp:Date.now(),sessionId:'debug-session',runId:'run1',hypothesisId:'A'})}).catch(()=>{});
-    // #endregion
     
     // ✅ VALIDAR CONFIGURAÇÕES DO SUPABASE
     if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
@@ -367,10 +353,12 @@ serve(async (req: Request) => {
     }
 
     // ✅ PROCESSAR RESPOSTA DO MERCADO PAGO
-    const payment = mpData.transactions?.[0]?.payments?.[0];
+    // A estrutura é: mpData.transactions.payments[0] (não mpData.transactions[0].payments[0])
+    const payment = mpData.transactions?.payments?.[0];
     
     if (!payment) {
       console.error("❌ Resposta do Mercado Pago sem payment:", mpData);
+      console.error("❌ Estrutura transactions:", mpData.transactions);
       return new Response(
         JSON.stringify({ 
           error: "Resposta inválida do Mercado Pago.",
@@ -395,8 +383,10 @@ serve(async (req: Request) => {
 
     // ✅ ADICIONAR QR CODE SE FOR PIX
     if (metodo_pagamento === "pix") {
-      const qrCode = payment.point_of_interaction?.transaction_data?.qr_code;
-      const qrCodeBase64 = payment.point_of_interaction?.transaction_data?.qr_code_base64;
+      // Na API Orders, o QR code está em payment.payment_method, não em point_of_interaction
+      const qrCode = payment.payment_method?.qr_code || payment.point_of_interaction?.transaction_data?.qr_code;
+      const qrCodeBase64 = payment.payment_method?.qr_code_base64 || payment.point_of_interaction?.transaction_data?.qr_code_base64;
+      const ticketUrl = payment.payment_method?.ticket_url;
       
       if (qrCode) {
         responseData.qr_code = qrCode;
@@ -404,8 +394,11 @@ serve(async (req: Request) => {
       if (qrCodeBase64) {
         responseData.qr_code_base64 = qrCodeBase64;
       }
+      if (ticketUrl) {
+        responseData.ticket_url = ticketUrl;
+      }
       
-      responseData.txid = payment.point_of_interaction?.transaction_data?.transaction_id || "";
+      responseData.txid = payment.reference_id || payment.point_of_interaction?.transaction_data?.transaction_id || "";
     }
 
     // ✅ SALVAR TRANSAÇÃO NO BANCO
