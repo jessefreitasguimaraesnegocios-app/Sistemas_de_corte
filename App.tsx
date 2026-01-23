@@ -4531,6 +4531,13 @@ export default function App() {
         // Se conseguiu refreshar, continuar silenciosamente
       }
       
+      // ✅ Aguardar um pouco para garantir que a sessão está totalmente pronta
+      if (retryCount === 0) {
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+      
+      console.log('🔍 Buscando business para user:', userId, 'tentativa:', retryCount + 1);
+      
       const { data: businessData, error: businessError } = await supabase
         .from('businesses')
         .select('*')
@@ -4540,25 +4547,44 @@ export default function App() {
       // Se erro de autenticação, tentar refresh e retry
       if (businessError) {
         if (businessError.code === 'PGRST116') {
-          // Não encontrado - não é erro
+          // Não encontrado - não é erro, apenas não existe
+          console.log('ℹ️ Business não encontrado para user:', userId);
           return null;
         }
         
-        // Se for erro de autenticação e ainda não tentou refresh, tentar novamente
-        if ((businessError.message?.includes('JWT') || businessError.message?.includes('token') || businessError.status === 401) && retryCount < 2) {
-          console.warn('Erro de autenticação, tentando refresh e retry...', businessError);
-          const { data: refreshData } = await supabase.auth.refreshSession();
-          if (refreshData?.session) {
+        // Log detalhado do erro
+        console.error('❌ Erro ao buscar business:', {
+          code: businessError.code,
+          message: businessError.message,
+          details: businessError.details,
+          hint: businessError.hint,
+          status: businessError.status,
+          retryCount
+        });
+        
+        // Se for erro de autenticação/permissão e ainda não tentou refresh, tentar novamente
+        if ((businessError.message?.includes('JWT') || 
+             businessError.message?.includes('token') || 
+             businessError.message?.includes('permission') ||
+             businessError.message?.includes('RLS') ||
+             businessError.status === 401 ||
+             businessError.status === 403) && retryCount < 2) {
+          console.warn('🔄 Erro de autenticação/permissão, tentando refresh e retry...', businessError);
+          const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession();
+          if (refreshData?.session && !refreshError) {
+            console.log('✅ Sessão renovada, tentando buscar business novamente...');
             await new Promise(resolve => setTimeout(resolve, 1000));
             return fetchUserBusiness(userId, retryCount + 1);
+          } else {
+            console.error('❌ Erro ao renovar sessão:', refreshError);
           }
         }
         
-        console.error('Erro ao buscar business do usuário:', businessError);
         return null;
       }
       
       if (businessData) {
+        console.log('✅ Business encontrado:', businessData.name, 'ID:', businessData.id);
         const biz: Business = {
           id: businessData.id,
           name: businessData.name,
@@ -4568,7 +4594,7 @@ export default function App() {
           image: businessData.image || (businessData.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
           rating: Number(businessData.rating) || 0,
           ownerId: businessData.owner_id,
-          monthlyFee: Number(businessData.monthly_fee) || 0,
+          monthlyFee: Number(businessData.monthly_fee) || 300, // Padrão: R$ 300,00
           revenueSplit: Number(businessData.revenue_split) || 10,
           status: businessData.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
           gatewayId: businessData.gateway_id,
@@ -4594,6 +4620,7 @@ export default function App() {
         return biz;
       }
       
+      console.log('ℹ️ Nenhum business encontrado para user:', userId);
       return null;
     } catch (error) {
       console.error('Erro ao buscar business do usuário:', error);
@@ -5208,7 +5235,13 @@ export default function App() {
       // Limitar retries
       if (retryCountRef.current >= MAX_RETRIES) {
         console.log('⛔ Limite de retries atingido, não tentando mais buscar userBusiness');
-        setBusinessLoadTimeout(false); // Não travar, apenas parar de tentar
+        // ✅ Só marcar timeout se realmente não encontrou após todas as tentativas
+        // Aguardar mais um pouco antes de mostrar erro
+        setTimeout(() => {
+          if (!userBusiness) {
+            setBusinessLoadTimeout(true);
+          }
+        }, 2000);
         return;
       }
       
@@ -5218,25 +5251,32 @@ export default function App() {
       }
       
       retryCountRef.current += 1;
+      console.log('🔄 Tentando buscar userBusiness, tentativa:', retryCountRef.current);
       
-      // Aguardar um pouco para garantir que fetchBusinesses terminou
+      // ✅ Aguardar mais tempo antes de buscar (evitar race conditions)
+      const delay = retryCountRef.current === 1 ? 2000 : 3000; // Primeira tentativa: 2s, demais: 3s
+      
       const timer = setTimeout(async () => {
         // Verificar novamente antes de chamar
         if (fetchingUserBusinessRef.current || userBusiness) {
+          console.log('⏸️ Busca cancelada - já existe userBusiness ou está em execução');
           return;
         }
         
         const biz = await fetchUserBusiness(user.id);
         if (!biz && retryCountRef.current < MAX_RETRIES && !fetchingUserBusinessRef.current) {
+          console.log('⏳ Business não encontrado, tentando novamente em 3s...');
           // Se não encontrou, tentar novamente após um delay maior
           setTimeout(async () => {
             if (!fetchingUserBusinessRef.current && !userBusiness) {
-              await fetchUserBusiness(user.id, 1);
+              await fetchUserBusiness(user.id, retryCountRef.current);
             }
           }, 3000);
+        } else if (biz) {
+          console.log('✅ Business encontrado e carregado:', biz.name);
+          setBusinessLoadTimeout(false);
         }
-        // Não marcar timeout - permitir que o sistema continue funcionando
-      }, 1500);
+      }, delay);
       
       return () => {
         clearTimeout(timer);
@@ -5701,8 +5741,11 @@ export default function App() {
             <div className="text-center max-w-md p-8 bg-white rounded-2xl shadow-lg border border-slate-200">
               <AlertCircle className="text-red-500 mx-auto mb-4" size={48} />
               <h3 className="text-2xl font-black text-slate-900 mb-2">Estabelecimento não encontrado</h3>
-              <p className="text-slate-600 mb-6">
+              <p className="text-slate-600 mb-4">
                 Não foi possível encontrar um estabelecimento associado à sua conta.
+              </p>
+              <p className="text-xs text-slate-500 mb-6">
+                {user?.id ? `ID do usuário: ${user.id.substring(0, 8)}...` : 'Usuário não identificado'}
               </p>
               <div className="space-y-3">
                 <button
@@ -5763,7 +5806,8 @@ export default function App() {
                           setLoadingBusinesses(false);
                           addToast('Estabelecimento carregado com sucesso!', 'success');
                         } else {
-                          addToast('Estabelecimento não encontrado. Entre em contato com o suporte.', 'error');
+                          console.error('❌ Business não encontrado após tentativa manual. User ID:', user.id);
+                          addToast('Estabelecimento não encontrado. Verifique se sua conta está vinculada a um estabelecimento.', 'error');
                           setLoadingBusinesses(false);
                           setBusinessLoadTimeout(true);
                         }
