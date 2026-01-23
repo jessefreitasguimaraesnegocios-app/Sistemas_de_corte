@@ -4141,6 +4141,11 @@ export default function App() {
 
   // Função para buscar transações de um business específico
   const fetchTransactionsForBusiness = useCallback(async (businessId: string) => {
+    if (!businessId) {
+      console.warn('⚠️ businessId não fornecido para buscar transações');
+      return [];
+    }
+    
     try {
       const { data, error } = await supabase
         .from('transactions')
@@ -4149,7 +4154,14 @@ export default function App() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Erro ao buscar transações:', error);
+        console.error('❌ Erro ao buscar transações:', {
+          error,
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          businessId
+        });
         return [];
       }
 
@@ -4210,6 +4222,11 @@ export default function App() {
 
   // Função para buscar colaboradores de um business específico
   const fetchCollaboratorsForBusiness = useCallback(async (businessId: string) => {
+    if (!businessId) {
+      console.warn('⚠️ businessId não fornecido para buscar colaboradores');
+      return [];
+    }
+    
     try {
       const { data, error } = await supabase
         .from('collaborators')
@@ -4219,7 +4236,14 @@ export default function App() {
         .order('created_at', { ascending: false });
 
       if (error) {
-        console.error('Erro ao buscar colaboradores:', error);
+        console.error('❌ Erro ao buscar colaboradores:', {
+          error,
+          message: error.message,
+          code: error.code,
+          details: error.details,
+          hint: error.hint,
+          businessId
+        });
         return [];
       }
 
