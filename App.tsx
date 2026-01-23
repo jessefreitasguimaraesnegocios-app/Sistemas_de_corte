@@ -5779,11 +5779,12 @@ export default function App() {
       );
     }
 
-    // Filtrar businesses baseado na categoria selecionada
-    const filteredBusinesses = useMemo(() => {
-      if (!businessCategoryFilter) return businesses;
-      return businesses.filter(biz => biz.type === businessCategoryFilter);
-    }, [businesses, businessCategoryFilter]);
+    // Filtrar businesses baseado na categoria selecionada (cálculo direto, sem hooks)
+    const filteredBusinesses = !Array.isArray(businesses) 
+      ? [] 
+      : !businessCategoryFilter 
+      ? businesses 
+      : businesses.filter(biz => biz && biz.type === businessCategoryFilter);
 
     return (
       <div className="max-w-6xl mx-auto p-10 space-y-12 pb-24">
