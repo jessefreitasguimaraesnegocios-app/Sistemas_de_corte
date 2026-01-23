@@ -8,6 +8,7 @@
 
 -- Remover políticas antigas conflitantes
 DROP POLICY IF EXISTS "Users can view their own business transactions" ON transactions;
+DROP POLICY IF EXISTS "Business owners can view their own transactions" ON transactions;
 
 -- Criar política corrigida para business owners verem suas transações
 CREATE POLICY "Business owners can view their own transactions"
