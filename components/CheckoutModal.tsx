@@ -178,13 +178,15 @@ export default function CheckoutModal({
         console.log('📊 Resultado da verificação:', result);
 
         if (result.approved) {
-          console.log('✅ Pagamento aprovado! Fechando modal...');
+          console.log('✅ Pagamento aprovado! Mostrando confirmação...');
           setPaymentStatus('approved');
           setCheckingPayment(false);
+          // Aguardar 2 segundos para mostrar a tela de sucesso, depois fechar
           setTimeout(() => {
+            console.log('🎉 Chamando onPaymentSuccess e fechando modal');
             onPaymentSuccess();
             onClose();
-          }, 2000);
+          }, 2500);
         } else if (result.status === 'rejected' || result.status === 'cancelled' || result.status === 'error') {
           console.log('❌ Pagamento rejeitado/cancelado:', result.status);
           setPaymentStatus('rejected');
@@ -716,10 +718,15 @@ export default function CheckoutModal({
                           </p>
                         </div>
                       ) : paymentStatus === 'approved' ? (
-                        <div className="flex items-center gap-3">
-                          <CheckCircle2 size={20} className="text-green-600" />
-                          <p className="text-sm text-green-700 font-semibold">
-                            Pagamento confirmado! Redirecionando...
+                        <div className="flex flex-col items-center gap-3 py-4 animate-pulse">
+                          <div className="bg-green-100 p-4 rounded-full">
+                            <CheckCircle2 size={40} className="text-green-600" />
+                          </div>
+                          <p className="text-lg text-green-700 font-black">
+                            Pagamento Aprovado!
+                          </p>
+                          <p className="text-sm text-green-600">
+                            Obrigado pela sua compra. Redirecionando...
                           </p>
                         </div>
                       ) : (

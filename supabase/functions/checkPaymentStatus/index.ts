@@ -39,12 +39,48 @@ serve(async (req: Request) => {
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
     
-    // ✅ Buscar transação no banco
-    const { data: transaction, error: transError } = await supabase
+    // ✅ ESTRATÉGIA DE BUSCA ROBUSTA:
+    // 1. Buscar pelo payment_id exato
+    // 2. Buscar pelo external_reference que contenha o payment_id (formato composto)
+    // 3. Buscar com LIKE no external_reference
+    
+    let { data: transaction, error: transError } = await supabase
       .from("transactions")
-      .select("status, payment_id, business_id")
+      .select("status, payment_id, business_id, external_reference")
       .eq("payment_id", payment_id.toString())
       .single();
+
+    // Se não encontrar pelo payment_id, tentar pelo external_reference
+    if (transError || !transaction) {
+      console.log("🔍 Tentando buscar pelo external_reference...");
+      
+      // Tentar busca exata pelo external_reference
+      const { data: transByRef, error: refError } = await supabase
+        .from("transactions")
+        .select("status, payment_id, business_id, external_reference")
+        .eq("external_reference", payment_id.toString())
+        .single();
+      
+      if (!refError && transByRef) {
+        transaction = transByRef;
+        transError = null;
+        console.log("✅ Transação encontrada pelo external_reference exato");
+      } else {
+        // Tentar busca com LIKE (external_reference pode ser composto: nosso_id|order_id)
+        const { data: transByLike, error: likeError } = await supabase
+          .from("transactions")
+          .select("status, payment_id, business_id, external_reference")
+          .like("external_reference", `%${payment_id}%`)
+          .limit(1)
+          .single();
+        
+        if (!likeError && transByLike) {
+          transaction = transByLike;
+          transError = null;
+          console.log("✅ Transação encontrada pelo external_reference (LIKE):", transByLike.external_reference);
+        }
+      }
+    }
 
     if (transError || !transaction) {
       console.warn("⚠️ Transação não encontrada para payment_id:", payment_id);
@@ -60,6 +96,12 @@ serve(async (req: Request) => {
         }
       );
     }
+    
+    console.log("✅ Transação encontrada:", {
+      status: transaction.status,
+      payment_id: transaction.payment_id,
+      external_reference: transaction.external_reference,
+    });
 
     console.log("✅ Transação encontrada no banco:", transaction);
 
@@ -146,11 +188,60 @@ serve(async (req: Request) => {
           isApproved = mpStatus === "approved";
         }
       } else {
-        // API de Orders (ID alfanumérico como PAY01KFA1YJB6MF5GH523T2HYY07M)
-        // Tentar buscar pela referência externa ou pelo ID do payment
-        // A API Orders não permite buscar por payment_id diretamente
-        // Vamos manter o status do banco
-        console.log("⚠️ Payment ID alfanumérico - mantendo status do banco");
+        // API de Orders (ID alfanumérico como PAY01KFEQG1GVG9AJ3359WVY12A35)
+        console.log("📦 Payment ID alfanumérico detectado - tentando buscar via Orders API");
+        
+        // Extrair order_id do external_reference (formato: pix_xxx|ORD...)
+        const orderIdMatch = transaction.external_reference?.match(/\|(ORD[A-Z0-9]+)$/);
+        const orderId = orderIdMatch ? orderIdMatch[1] : null;
+        
+        if (orderId) {
+          console.log("🔍 Buscando Order:", orderId);
+          
+          const orderResponse = await fetch(
+            `https://api.mercadopago.com/v1/orders/${orderId}`,
+            {
+              headers: {
+                "Authorization": `Bearer ${businessData.mp_access_token}`,
+              },
+            }
+          );
+
+          if (orderResponse.ok) {
+            const orderData = await orderResponse.json();
+            console.log("📊 Resposta da API Orders:", { 
+              status: orderData.status, 
+              status_detail: orderData.status_detail,
+              payments: orderData.transactions?.payments?.length 
+            });
+            
+            // Verificar status dos payments dentro da order
+            const payments = orderData.transactions?.payments || [];
+            const approvedPayment = payments.find((p: any) => p.status === "approved");
+            
+            if (approvedPayment) {
+              mpStatus = "approved";
+              isApproved = true;
+              console.log("✅ Payment aprovado encontrado na Order");
+            } else if (orderData.status === "paid" || orderData.status === "closed") {
+              mpStatus = "approved";
+              isApproved = true;
+              console.log("✅ Order com status paid/closed");
+            } else {
+              mpStatus = orderData.status || "pending";
+              console.log("⏳ Order ainda pendente:", orderData.status);
+            }
+          } else {
+            console.log("⚠️ Não foi possível buscar Order - mantendo status do banco");
+          }
+        } else {
+          console.log("⚠️ Order ID não encontrado no external_reference - mantendo status do banco");
+          // Se o status no banco já é PAID, considerar aprovado
+          if (transaction.status?.toUpperCase() === "PAID") {
+            isApproved = true;
+            mpStatus = "approved";
+          }
+        }
       }
     } catch (mpError) {
       console.error("❌ Erro ao consultar API do Mercado Pago:", mpError);

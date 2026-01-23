@@ -9,7 +9,7 @@ import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 // ✅ MP_SPONSOR_ID = User ID da conta da PLATAFORMA (marketplace) que recebe a comissão
 // Este é o User ID da conta dona da aplicação sistemasplit, NÃO do vendedor
 const MP_SPONSOR_ID = Deno.env.get("MP_SPONSOR_ID") || "";
-const URL_WEBHOOK = Deno.env.get("MP_WEBHOOK_URL") || "";
+const MP_WEBHOOK_URL = Deno.env.get("MP_WEBHOOK_URL") || "";
 
 // ✅ Configurações do Supabase - OBRIGATÓRIAS
 // GARANTIR que esses dois existem em: Supabase → Edge Functions → Secrets
@@ -243,6 +243,15 @@ serve(async (req: Request) => {
       }
     };
 
+    // ✅ NOTA: A API Orders v1 não suporta notification_url no body
+    // Os webhooks são configurados no painel do Mercado Pago em "Webhooks"
+    // Certifique-se de que o evento "Order (Mercado Pago)" está habilitado
+    if (MP_WEBHOOK_URL) {
+      console.log("📢 Webhook configurado no painel MP:", MP_WEBHOOK_URL);
+    } else {
+      console.warn("⚠️ MP_WEBHOOK_URL não configurada nos secrets - verifique configuração no painel MP");
+    }
+
     if (marketplace_fee > 0) {
       orderData.marketplace_fee = marketplace_fee.toFixed(2);
     }
@@ -270,16 +279,21 @@ serve(async (req: Request) => {
     }
 
     console.log("📤 Chamando API Mercado Pago...");
-    console.log("💰 Split:", {
+    console.log("💰 Split configurado:", {
       valorTotal: valor,
       comissaoPercentual: COMISSAO_PERCENTUAL,
       marketplaceFee: marketplace_fee,
-      sponsorId: MP_SPONSOR_ID, // User ID da plataforma
+      marketplaceFeeFormatted: orderData.marketplace_fee,
+      sponsorId: MP_SPONSOR_ID,
       businessId: business_id,
-      businessMpUserId: business.mp_user_id, // User ID do vendedor (para referência)
+      businessMpUserId: business.mp_user_id,
+      // Verificar se o token é do vendedor (OAuth) ou da plataforma
+      tokenType: ACCESS_TOKEN_VENDEDOR?.startsWith("APP_USR-") ? "PRODUÇÃO (vendedor OAuth)" : 
+                 ACCESS_TOKEN_VENDEDOR?.startsWith("TEST-") ? "TESTE" : "DESCONHECIDO",
     });
     console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
     console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
+    console.log("⚠️ IMPORTANTE: Para o split funcionar, o token DEVE ser do VENDEDOR (obtido via OAuth), não da plataforma!");
 
     // ✅ CHAMAR API MERCADO PAGO
     let mpResponse: Response;
@@ -323,18 +337,27 @@ serve(async (req: Request) => {
       });
 
       if (!mpResponse.ok) {
+        // Extrair detalhes do erro de forma mais completa
+        const errorDetails = mpData?.message 
+          || mpData?.error 
+          || mpData?.cause?.[0]?.description 
+          || mpData?.cause?.[0]?.code
+          || (mpData?.cause ? JSON.stringify(mpData.cause) : null)
+          || JSON.stringify(mpData);
+        
         console.error("❌ Erro na API Mercado Pago:", {
           status: mpResponse.status,
           statusText: mpResponse.statusText,
-          mpData: mpData,
+          mpData: JSON.stringify(mpData, null, 2),
           mpError: mpData?.error,
           mpMessage: mpData?.message,
           mpCause: mpData?.cause,
+          errorDetails: errorDetails,
         });
         return new Response(
           JSON.stringify({ 
             error: "Erro ao processar pagamento no Mercado Pago.",
-            details: mpData?.message || mpData?.error || mpData?.cause?.[0]?.description || "Erro desconhecido",
+            details: errorDetails,
             mpStatus: mpResponse.status,
             mpData: mpData
           }),
@@ -371,11 +394,22 @@ serve(async (req: Request) => {
     const paymentId = payment.id;
     const paymentStatus = payment.status;
     const paymentStatusDetail = payment.status_detail || "";
+    
+    // ✅ IMPORTANTE: Capturar o order_id da resposta do Mercado Pago
+    // O webhook pode enviar o payment_id OU o order_id, precisamos ter ambos
+    const orderId = mpData.id; // ID da Order (ex: "01JHV...")
+    
+    console.log("📋 IDs capturados:", {
+      orderId: orderId,
+      paymentId: paymentId,
+      externalReference: referencia_externa,
+    });
 
     // ✅ PREPARAR RESPOSTA
     let responseData: any = {
       success: true,
       payment_id: paymentId,
+      order_id: orderId,
       status: paymentStatus,
       status_detail: paymentStatusDetail,
       application_fee: marketplace_fee,
@@ -402,7 +436,14 @@ serve(async (req: Request) => {
     }
 
     // ✅ SALVAR TRANSAÇÃO NO BANCO
+    // IMPORTANTE: Salvamos AMBOS os IDs para garantir que o webhook encontre a transação
+    // - payment_id: ID do payment dentro da order (usado pelo webhook)
+    // - external_reference: nosso ID interno + order_id do MP para fallback
     const partnerNet = valor - marketplace_fee;
+    
+    // Criar external_reference composto: nosso_id|order_id_mp
+    // Isso permite buscar tanto pelo nosso ID quanto pelo order_id do MP
+    const compositeExternalRef = orderId ? `${referencia_externa}|${orderId}` : referencia_externa;
     
     const { error: transactionError } = await supabaseAdmin
       .from("transactions")
@@ -416,8 +457,14 @@ serve(async (req: Request) => {
         payment_id: String(paymentId),
         payment_method: metodo_pagamento,
         customer_email: email_cliente,
-        external_reference: referencia_externa,
+        external_reference: compositeExternalRef,
       });
+    
+    console.log("💾 Transação salva com:", {
+      payment_id: String(paymentId),
+      external_reference: compositeExternalRef,
+      order_id: orderId,
+    });
 
     if (transactionError) {
       console.error("⚠️ Erro ao salvar transação (não crítico):", transactionError);

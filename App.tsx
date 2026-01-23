@@ -352,7 +352,7 @@ const CartDrawer = ({ isOpen, onClose, cartItems, onUpdateQuantity, onRemove, on
 
 // --- CRM BUSINESS OWNER VIEW ---
 
-const BusinessOwnerDashboard = ({ business, collaborators, products, services, appointments, setCollaborators, setProducts, setServices, setAppointments, addToast, setBusinesses, businesses }: any) => {
+const BusinessOwnerDashboard = ({ business, collaborators, products, services, appointments, transactions, setCollaborators, setProducts, setServices, setAppointments, setTransactions, addToast, setBusinesses, businesses }: any) => {
   // ✅ Verificar se há aba para restaurar após OAuth
   const getInitialTab = (): 'DASHBOARD' | 'APPOINTMENTS' | 'STORE' | 'SERVICES' | 'TEAM' | 'SETTINGS' => {
     if (typeof window !== 'undefined' && window.location?.state) {
@@ -1221,14 +1221,31 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
           </div>
         );
       default: // DASHBOARD
+        // Calcular valores reais das transações
+        const businessTransactions = (transactions || []).filter((t: any) => t.businessId === business.id);
+        const paidTransactions = businessTransactions.filter((t: any) => t.status === 'PAID');
+        
+        // Receita líquida = soma do partnerNet (valor que o business recebe após taxa)
+        const totalReceitaLiquida = paidTransactions.reduce((sum: number, t: any) => sum + (t.partnerNet || 0), 0);
+        
+        // Vendas = quantidade de transações pagas
+        const totalVendas = paidTransactions.length;
+        
+        // Serviços = filtrar transações que são de serviços (não de loja)
+        // Por enquanto, contamos appointments concluídos
+        const appointmentsDoNegocio = appointments.filter((a: any) => a.businessId === business.id);
+        
+        // Profissionais ativos
+        const profissionaisAtivos = collaborators.filter((c: any) => c.businessId === business.id).length;
+        
         return (
           <div className="space-y-8 animate-in fade-in duration-500">
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                {[
-                 { label: 'Receita Líquida', value: 'R$ 8.420', icon: DollarSign, color: 'text-green-600' },
-                 { label: 'Serviços Realizados', value: appointments.length, icon: Scissors, color: 'text-indigo-600' },
-                 { label: 'Vendas Loja', value: '28', icon: ShoppingBag, color: 'text-rose-600' },
-                 { label: 'Profissionais', value: collaborators.filter((c:any) => c.businessId === business.id).length, icon: Users, color: 'text-blue-600' },
+                 { label: 'Receita Líquida', value: `R$ ${totalReceitaLiquida.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, icon: DollarSign, color: 'text-green-600' },
+                 { label: 'Serviços Realizados', value: appointmentsDoNegocio.length, icon: Scissors, color: 'text-indigo-600' },
+                 { label: 'Vendas Realizadas', value: totalVendas, icon: ShoppingBag, color: 'text-rose-600' },
+                 { label: 'Profissionais', value: profissionaisAtivos, icon: Users, color: 'text-blue-600' },
                ].map((s, i) => (
                  <div key={i} className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex items-center gap-4">
                    <div className={`bg-slate-50 ${s.color} p-3 rounded-xl`}><s.icon size={24} /></div>
@@ -4095,6 +4112,7 @@ export default function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loadingData, setLoadingData] = useState(true);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  const [transactions, setTransactions] = useState<any[]>([]); // Transações do business
   const [loadingBusinesses, setLoadingBusinesses] = useState(true);
   const [businessLoadTimeout, setBusinessLoadTimeout] = useState(false);
   // Flags para evitar loops infinitos e múltiplas chamadas simultâneas
@@ -4119,6 +4137,43 @@ export default function App() {
   const [isSignUp, setIsSignUp] = useState(false);
   const [loginForm, setLoginForm] = useState({ email: '', password: '', name: '' });
   const [adminLoginForm, setAdminLoginForm] = useState({ email: '', password: '' });
+  const [businessCategoryFilter, setBusinessCategoryFilter] = useState<'BARBERSHOP' | 'SALON' | null>(null);
+
+  // Função para buscar transações de um business específico
+  const fetchTransactionsForBusiness = useCallback(async (businessId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('transactions')
+        .select('*')
+        .eq('business_id', businessId)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Erro ao buscar transações:', error);
+        return [];
+      }
+
+      if (data && data.length > 0) {
+        return data.map((t: any) => ({
+          id: t.id,
+          businessId: t.business_id,
+          amount: Number(t.amount) || 0,
+          adminFee: Number(t.admin_fee) || 0,
+          partnerNet: Number(t.partner_net) || 0,
+          status: t.status,
+          gateway: t.gateway,
+          paymentId: t.payment_id,
+          paymentMethod: t.payment_method,
+          customerEmail: t.customer_email,
+          createdAt: t.created_at,
+        }));
+      }
+      return [];
+    } catch (error) {
+      console.error('Erro ao buscar transações:', error);
+      return [];
+    }
+  }, []);
 
   // Função para buscar produtos de um business específico
   const fetchProductsForBusiness = useCallback(async (businessId: string) => {
@@ -5189,6 +5244,27 @@ export default function App() {
     }
   }, [selectedBusiness?.id, fetchProductsForBusiness, fetchCollaboratorsForBusiness, fetchServicesForBusiness]);
 
+  // Buscar dados do business owner (incluindo transações) quando userBusiness é carregado
+  useEffect(() => {
+    if (userBusiness?.id) {
+      const loadOwnerData = async () => {
+        console.log('📊 Carregando dados do business owner:', userBusiness.id);
+        const [prods, collabs, servs, trans] = await Promise.all([
+          fetchProductsForBusiness(userBusiness.id),
+          fetchCollaboratorsForBusiness(userBusiness.id),
+          fetchServicesForBusiness(userBusiness.id),
+          fetchTransactionsForBusiness(userBusiness.id),
+        ]);
+        setProducts(prods);
+        setCollaborators(collabs);
+        setServices(servs);
+        setTransactions(trans);
+        console.log('✅ Dados carregados:', { products: prods.length, collaborators: collabs.length, services: servs.length, transactions: trans.length });
+      };
+      loadOwnerData();
+    }
+  }, [userBusiness?.id, fetchProductsForBusiness, fetchCollaboratorsForBusiness, fetchServicesForBusiness, fetchTransactionsForBusiness]);
+
   const addToast = (message: string, type: 'success' | 'error' = 'success') => setToast({ message, type });
 
   // --- CART LOGIC ---
@@ -5659,10 +5735,12 @@ export default function App() {
           products={products}
           services={services}
           appointments={appointments}
+          transactions={transactions}
           setCollaborators={setCollaborators}
           setProducts={setProducts}
           setServices={setServices}
           setAppointments={setAppointments}
+          setTransactions={setTransactions}
           addToast={addToast}
           setBusinesses={setBusinesses}
           businesses={businesses}
@@ -5701,12 +5779,55 @@ export default function App() {
       );
     }
 
+    // Filtrar businesses baseado na categoria selecionada
+    const filteredBusinesses = useMemo(() => {
+      if (!businessCategoryFilter) return businesses;
+      return businesses.filter(biz => biz.type === businessCategoryFilter);
+    }, [businesses, businessCategoryFilter]);
+
     return (
       <div className="max-w-6xl mx-auto p-10 space-y-12 pb-24">
         <div className="bg-slate-900 rounded-[3rem] p-12 text-white relative overflow-hidden shadow-2xl">
            <div className="relative z-10 max-w-2xl space-y-6">
               <h1 className="text-6xl font-black leading-none tracking-tighter">Sua beleza, <br/>em boas mãos.</h1>
               <p className="text-slate-400 text-xl font-medium">Encontre as melhores barbearias e salões e agende em segundos.</p>
+              
+              {/* Filtros de Categoria */}
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => setBusinessCategoryFilter(null)}
+                  className={`px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg ${
+                    businessCategoryFilter === null
+                      ? 'bg-white text-slate-900 scale-105'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                  }`}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setBusinessCategoryFilter('BARBERSHOP')}
+                  className={`px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg flex items-center gap-2 ${
+                    businessCategoryFilter === 'BARBERSHOP'
+                      ? 'bg-indigo-600 text-white scale-105'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                  }`}
+                >
+                  <Scissors size={18} />
+                  Barbearias
+                </button>
+                <button
+                  onClick={() => setBusinessCategoryFilter('SALON')}
+                  className={`px-6 py-3 rounded-xl font-black text-sm transition-all shadow-lg flex items-center gap-2 ${
+                    businessCategoryFilter === 'SALON'
+                      ? 'bg-rose-500 text-white scale-105'
+                      : 'bg-white/10 text-white hover:bg-white/20 border border-white/20'
+                  }`}
+                >
+                  <Sparkles size={18} />
+                  Salões de Estética
+                </button>
+              </div>
+
               <div className="flex bg-white/10 backdrop-blur-md rounded-2xl p-2 border border-white/10 shadow-2xl focus-within:bg-white transition-all">
                 <Search className="text-slate-400 m-4" />
                 <input type="text" placeholder="Estilo, serviço ou profissional..." className="flex-1 bg-transparent border-none outline-none font-medium text-slate-900" />
@@ -5716,21 +5837,35 @@ export default function App() {
            <div className="absolute right-[-10%] bottom-[-10%] w-[500px] h-[500px] bg-indigo-600 rounded-full blur-[160px] opacity-20" />
         </div>
         
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
-          {businesses.map(biz => (
-            <div key={biz.id} onClick={() => setSelectedBusiness(biz)} className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 cursor-pointer group">
-               <div className="h-64 relative overflow-hidden">
-                 <img src={biz.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
-                 <div className="absolute top-6 left-6 bg-white/90 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg">{biz.type === 'BARBERSHOP' ? 'Barbearia' : 'Salão Premium'}</div>
-                 <div className="absolute bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-2xl text-sm font-black flex items-center gap-2"><Star size={16} fill="#f59e0b" className="text-amber-500" /> {biz.rating}</div>
-               </div>
-               <div className="p-10 space-y-6">
-                 <div><h3 className="text-3xl font-black tracking-tighter mb-2 text-slate-900 group-hover:text-indigo-600 transition-colors">{biz.name}</h3><p className="text-slate-600 font-medium line-clamp-2">{biz.description}</p></div>
-                 <button className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200">Ver Agenda & Loja <ChevronRight size={18} /></button>
-               </div>
-            </div>
-          ))}
-        </div>
+        {filteredBusinesses.length === 0 ? (
+          <div className="text-center py-20">
+            <p className="text-slate-500 text-lg font-medium">
+              {businessCategoryFilter === 'BARBERSHOP' 
+                ? 'Nenhuma barbearia encontrada no momento.' 
+                : businessCategoryFilter === 'SALON'
+                ? 'Nenhum salão de estética encontrado no momento.'
+                : 'Nenhum estabelecimento encontrado no momento.'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-10">
+            {filteredBusinesses.map(biz => (
+              <div key={biz.id} onClick={() => setSelectedBusiness(biz)} className="bg-white rounded-[2.5rem] overflow-hidden border border-slate-100 shadow-sm hover:shadow-2xl hover:-translate-y-2 transition-all duration-500 cursor-pointer group">
+                 <div className="h-64 relative overflow-hidden">
+                   <img src={biz.image} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="" />
+                   <div className="absolute top-6 left-6 bg-white/90 px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest shadow-lg">
+                     {biz.type === 'BARBERSHOP' ? 'Barbearia' : 'Salões de Estética'}
+                   </div>
+                   <div className="absolute bottom-6 right-6 bg-slate-900 text-white px-4 py-2 rounded-2xl text-sm font-black flex items-center gap-2"><Star size={16} fill="#f59e0b" className="text-amber-500" /> {biz.rating}</div>
+                 </div>
+                 <div className="p-10 space-y-6">
+                   <div><h3 className="text-3xl font-black tracking-tighter mb-2 text-slate-900 group-hover:text-indigo-600 transition-colors">{biz.name}</h3><p className="text-slate-600 font-medium line-clamp-2">{biz.description}</p></div>
+                   <button className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 group-hover:bg-indigo-600 transition-all shadow-xl shadow-slate-200">Ver Agenda & Loja <ChevronRight size={18} /></button>
+                 </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     );
   };
