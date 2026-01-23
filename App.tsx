@@ -3044,6 +3044,8 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                       <tr>
                         <th className="px-8 py-4">Estabelecimento</th>
                         <th className="px-8 py-4 text-center">Status Pagamento</th>
+                        <th className="px-8 py-4 text-center">Split %</th>
+                        <th className="px-8 py-4 text-center">Mensalidade</th>
                         <th className="px-8 py-4 text-center">Faturamento Bruto</th>
                         <th className="px-8 py-4 text-right">Split Líquido Hub</th>
                       </tr>
@@ -3054,6 +3056,9 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                         const totalRevenue = summary?.total_revenue || 0;
                         const adminFee = summary?.total_admin_fee || 0;
                         const isPaid = b.status === 'ACTIVE' && (Number(b.monthlyFee) || 0) > 0;
+                        
+                        const splitPercent = Number(b.revenueSplit) || 10;
+                        const monthlyFee = Number(b.monthlyFee) || 300;
                         
                         return (
                           <tr key={b.id} className="text-sm hover:bg-slate-50 transition-colors">
@@ -3066,6 +3071,12 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                               }`}>
                                 {isPaid ? 'EM DIA' : 'PENDENTE'}
                               </span>
+                            </td>
+                            <td className="px-8 py-4 text-center font-medium text-slate-700">
+                              {splitPercent}%
+                            </td>
+                            <td className="px-8 py-4 text-center font-medium text-slate-700">
+                              R$ {monthlyFee.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                             </td>
                             <td className="px-8 py-4 text-center font-medium text-slate-700">
                               R$ {totalRevenue.toFixed(2)}
