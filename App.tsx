@@ -1198,6 +1198,27 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
                   </div>
                 </div>
 
+                {/* Mensalidade */}
+                <div className="p-6 bg-indigo-50 rounded-2xl border-2 border-indigo-200">
+                  <div className="flex items-start justify-between mb-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <DollarSign className="text-indigo-600" size={20} />
+                        <h4 className="text-lg font-black text-slate-900">Mensalidade</h4>
+                      </div>
+                      <p className="text-sm text-slate-600 mb-4">
+                        Valor mensal que seu estabelecimento paga para utilizar a plataforma.
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <span className="text-3xl font-black text-indigo-600">
+                          R$ {(business?.monthlyFee || 300).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </span>
+                        <span className="text-sm text-slate-500">/mês</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
                 <div className="p-6 bg-slate-50 rounded-2xl border border-slate-200">
                   <div className="flex items-center justify-between mb-4">
                     <div>
