@@ -31,10 +31,9 @@ serve(async (req: Request) => {
 
   try {
     // Aceitar parâmetros tanto do body (JSON) quanto da query string (URL)
-    // O Mercado Pago pode enviar via query string, mas o frontend também pode enviar via body
+    // O Mercado Pago envia via query string, mas o frontend também pode enviar via body
     let code: string | null = null;
     let state: string | null = null;
-    let redirect_uri: string | null = null;
 
     // Tentar ler da query string primeiro (formato do Mercado Pago)
     const url = new URL(req.url);
@@ -47,25 +46,16 @@ serve(async (req: Request) => {
         const body = await req.json();
         code = body.code || code;
         state = body.state || state;
-        redirect_uri = body.redirect_uri || null;
+        // ❌ SEGURANÇA: NÃO ler redirect_uri do body - sempre usar do secret
       } catch (e) {
         // Body não é JSON válido, usar apenas query string
         console.log('⚠️ Body não é JSON, usando apenas query string');
-      }
-    } else {
-      // Se veio da query string, tentar ler redirect_uri do body se existir
-      try {
-        const body = await req.json();
-        redirect_uri = body.redirect_uri || null;
-      } catch (e) {
-        // Ignorar se body não for JSON
       }
     }
 
     console.log('🔍 Parâmetros recebidos:', { 
       hasCode: !!code, 
-      hasState: !!state, 
-      hasRedirectUri: !!redirect_uri 
+      hasState: !!state
     });
 
     if (!code || !state) {
@@ -81,30 +71,37 @@ serve(async (req: Request) => {
     // state carrega o business_id para associar tokens
     const businessId = state;
 
-    // Validar secrets obrigatórios APÓS ler parâmetros
-    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET) {
-      return new Response(
-        JSON.stringify({ 
-          error: "MP_CLIENT_ID ou MP_CLIENT_SECRET não configurados nos secrets",
-          hint: "Configure os secrets MP_CLIENT_ID e MP_CLIENT_SECRET no Supabase Dashboard"
-        }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+    // ✅ SEGURANÇA: Validar se o business existe antes de processar
+    console.log('🔍 Validando business_id:', businessId);
+    const { data: business, error: businessError } = await supabase
+      .from("businesses")
+      .select("id, name")
+      .eq("id", businessId)
+      .single();
+
+    if (businessError || !business) {
+      console.error('❌ Business inválido no state:', { businessId, error: businessError });
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=invalid_business`;
+      return Response.redirect(errorUrl, 302);
     }
 
-    // Usar redirect_uri do body (mesmo usado na autorização) ou fallback para secret
-    // IMPORTANTE: O redirect_uri deve ser EXATAMENTE o mesmo usado na URL de autorização
-    const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
+    console.log('✅ Business validado:', business.name);
+
+    // Validar secrets obrigatórios
+    if (!MP_CLIENT_ID || !MP_CLIENT_SECRET) {
+      console.error('❌ Secrets do Mercado Pago não configurados');
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=missing_secrets`;
+      return Response.redirect(errorUrl, 302);
+    }
+
+    // ✅ SEGURANÇA: SEMPRE usar redirect_uri do secret, NUNCA do body
+    // O redirect_uri deve ser EXATAMENTE o mesmo usado na URL de autorização
+    const finalRedirectUri = MP_REDIRECT_URI;
     
-    // redirect_uri é obrigatório, mas pode vir do body OU do secret
     if (!finalRedirectUri) {
-      return new Response(
-        JSON.stringify({ 
-          error: "redirect_uri é obrigatório",
-          hint: "Passe redirect_uri no body OU configure o secret MP_REDIRECT_URI no Supabase Dashboard"
-        }),
-        { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      console.error('❌ MP_REDIRECT_URI não configurado');
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=missing_redirect_uri`;
+      return Response.redirect(errorUrl, 302);
     }
 
     console.log("🔄 Trocando code por token com redirect_uri:", finalRedirectUri);
@@ -149,26 +146,15 @@ serve(async (req: Request) => {
         statusText: tokenResponse.statusText,
         result: tokenResult
       });
-      return new Response(
-        JSON.stringify({ 
-          error: "Erro ao trocar code por token", 
-          details: tokenResult,
-          status: tokenResponse.status
-        }),
-        { status: tokenResponse.status || 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=token_exchange_failed`;
+      return Response.redirect(errorUrl, 302);
     }
 
     // Validar que temos os dados necessários
     if (!tokenResult || !tokenResult.access_token) {
       console.error("❌ Resposta do Mercado Pago não contém access_token:", tokenResult);
-      return new Response(
-        JSON.stringify({ 
-          error: "Resposta inválida do Mercado Pago", 
-          details: "access_token não encontrado na resposta"
-        }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=invalid_token_response`;
+      return Response.redirect(errorUrl, 302);
     }
 
     const {
@@ -200,33 +186,18 @@ serve(async (req: Request) => {
 
     if (updateError) {
       console.error("❌ Erro ao salvar tokens no banco:", updateError);
-      return new Response(
-        JSON.stringify({ 
-          error: "Erro ao salvar tokens no banco de dados", 
-          details: updateError.message,
-          code: updateError.code
-        }),
-        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-      );
+      const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=save_failed`;
+      return Response.redirect(errorUrl, 302);
     }
 
     console.log("✅ Tokens salvos com sucesso para business:", businessId);
 
-    return new Response(
-      JSON.stringify({
-        success: true,
-        business_id: businessId,
-        live_mode,
-        has_refresh_token: !!refresh_token,
-        expires_at: expiresAt,
-      }),
-      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    // ✅ UX: Redirecionar o usuário para o dashboard com sucesso
+    const successUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=connected&business_id=${businessId}`;
+    return Response.redirect(successUrl, 302);
   } catch (error: any) {
-    console.error("Erro no callback OAuth:", error);
-    return new Response(
-      JSON.stringify({ error: error.message || "Erro interno" }),
-      { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } }
-    );
+    console.error("❌ Erro no callback OAuth:", error);
+    const errorUrl = `${MP_REDIRECT_URI?.replace('/oauth/callback', '') || 'https://sistemas-de-corte.vercel.app'}/dashboard?mp=error&reason=internal_error`;
+    return Response.redirect(errorUrl, 302);
   }
 });
