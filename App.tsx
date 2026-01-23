@@ -713,12 +713,22 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     } else if (showModal === 'TEAM') {
       if (editingItem && editingItem._type === 'collaborator') {
         // Editar colaborador existente
+        if (!newItem.name || !newItem.name.trim()) {
+          addToast('Nome do profissional é obrigatório', 'error');
+          return;
+        }
+        
+        if (!newItem.role || !newItem.role.trim()) {
+          addToast('Cargo/Especialidade é obrigatório', 'error');
+          return;
+        }
+        
         try {
           const { error } = await supabase
             .from('collaborators')
             .update({
-              name: newItem.name,
-              role: newItem.role,
+              name: newItem.name.trim(),
+              role: newItem.role.trim() || 'Profissional', // Valor padrão se estiver vazio
               avatar: newItem.avatar || editingItem.avatar,
             })
             .eq('id', editingItem.id);
@@ -738,13 +748,23 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         }
       } else {
         // Adicionar novo colaborador
+        if (!newItem.name || !newItem.name.trim()) {
+          addToast('Nome do profissional é obrigatório', 'error');
+          return;
+        }
+        
+        if (!newItem.role || !newItem.role.trim()) {
+          addToast('Cargo/Especialidade é obrigatório', 'error');
+          return;
+        }
+        
         try {
           const { data, error } = await supabase
             .from('collaborators')
             .insert({
               business_id: business.id,
-              name: newItem.name,
-              role: newItem.role,
+              name: newItem.name.trim(),
+              role: newItem.role.trim() || 'Profissional', // Valor padrão se estiver vazio
               avatar: newItem.avatar || `https://i.pravatar.cc/150?u=${Math.random()}`,
               rating: 5.0,
               status: 'ACTIVE',
@@ -1633,7 +1653,7 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
               )}
               <button 
                 onClick={handleAddItem}
-                disabled={!newItem.name}
+                disabled={!newItem.name || !newItem.name.trim() || (showModal === 'TEAM' && (!newItem.role || !newItem.role.trim()))}
                 className="w-full bg-slate-900 text-white py-5 rounded-2xl font-black text-lg shadow-xl shadow-slate-200 hover:bg-indigo-600 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 {editingItem ? 'Salvar Alterações' : 'Salvar'}
