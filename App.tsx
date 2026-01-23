@@ -2461,10 +2461,14 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
   };
 
   // Calcular MRR (Monthly Recurring Revenue) baseado em monthly_fee dos businesses ativos
+  // Valor padrão de mensalidade: R$ 300,00
   const calculateMRR = () => {
     return businesses
       .filter((b: any) => b.status === 'ACTIVE')
-      .reduce((total: number, b: any) => total + (Number(b.monthlyFee) || 0), 0);
+      .reduce((total: number, b: any) => {
+        const monthlyFee = Number(b.monthlyFee) || 300; // Padrão: R$ 300,00
+        return total + monthlyFee;
+      }, 0);
   };
 
   // Buscar dados financeiros quando a aba FINANCE for ativada
@@ -3016,6 +3020,9 @@ const CentralAdminView = ({ businesses, setBusinesses, activeTab, addToast, fetc
                 <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm">
                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">SaaS Recorrente (MRR)</p>
                    <p className="text-4xl font-black text-slate-900 mt-2">{formatCurrency(mrr)}</p>
+                   <p className="text-xs text-slate-500 mt-2">
+                     Soma das mensalidades dos estabelecimentos ativos
+                   </p>
                 </div>
                 <div className="bg-white p-8 rounded-[2rem] border border-slate-200 shadow-sm">
                    <p className="text-xs font-black uppercase tracking-widest text-slate-400">Estabelecimentos</p>
@@ -4420,7 +4427,7 @@ export default function App() {
           image: b.image || (b.type === 'BARBERSHOP' ? DEFAULT_BARBERSHOP_IMAGE : DEFAULT_SALON_IMAGE),
           rating: Number(b.rating) || 0,
           ownerId: b.owner_id,
-          monthlyFee: Number(b.monthly_fee) || 0,
+          monthlyFee: Number(b.monthly_fee) || 300, // Padrão: R$ 300,00
           revenueSplit: Number(b.revenue_split) || 10,
           status: b.status as 'ACTIVE' | 'PENDING' | 'SUSPENDED',
           gatewayId: b.gateway_id,
