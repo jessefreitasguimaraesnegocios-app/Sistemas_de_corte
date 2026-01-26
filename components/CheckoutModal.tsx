@@ -546,6 +546,8 @@ export default function CheckoutModal({
       // O SDK valida automaticamente todos os campos (número, CVV, validade)
       // Se os campos não estiverem prontos, o SDK retornará um erro claro
       let cardToken: string;
+      let paymentMethodId: string | null = null; // ✅ Declarar fora do try para estar no escopo correto
+      
       try {
         console.log('🔄 Gerando token do cartão com SDK do Mercado Pago...');
         console.log('✅ SDK inicializado:', mpInitialized);
@@ -570,7 +572,7 @@ export default function CheckoutModal({
         // ✅ IMPORTANTE: Não podemos buscar bandeira do frontend (CORS bloqueia)
         // A Edge Function vai buscar a bandeira do token via API do Mercado Pago
         // O SDK pode retornar payment_method_id, mas nem sempre está disponível
-        const paymentMethodId = tokenData.payment_method_id || null;
+        paymentMethodId = tokenData.payment_method_id || null;
         
         console.log('✅ Token do cartão gerado com sucesso');
         if (paymentMethodId) {
@@ -593,7 +595,7 @@ export default function CheckoutModal({
         email, 
         cardToken, 
         validBusinessId,
-        paymentMethodId // ✅ Bandeira do cartão
+        paymentMethodId // ✅ Bandeira do cartão (pode ser null, backend vai buscar)
       );
       
       if (response.success && response.status === 'approved') {
