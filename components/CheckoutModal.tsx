@@ -37,14 +37,13 @@ export default function CheckoutModal({
   const [paymentStatus, setPaymentStatus] = useState<'pending' | 'approved' | 'rejected' | null>(null);
 
   // Formulário de cartão
-  const [cardNumber, setCardNumber] = useState('');
   const [cardName, setCardName] = useState('');
-  const [cardExpiry, setCardExpiry] = useState('');
-  const [cardCvv, setCardCvv] = useState('');
   const [mpPublicKey, setMpPublicKey] = useState<string | null>(null);
   const [mpInitialized, setMpInitialized] = useState(false);
   
   // Refs para os campos seguros do Mercado Pago
+  // ✅ IMPORTANTE: Os campos CardNumber, SecurityCode e ExpirationDate são gerenciados pelo SDK
+  // Não usamos useState para eles - o SDK gerencia o estado internamente
   const cardNumberRef = useRef<any>(null);
   const securityCodeRef = useRef<any>(null);
   const expirationDateRef = useRef<any>(null);
@@ -154,15 +153,35 @@ export default function CheckoutModal({
       setCardData(null);
       setError(null);
       setActiveTab('pix');
-      setCardNumber('');
       setCardName('');
-      setCardExpiry('');
-      setCardCvv('');
       setCopied(false);
       setCheckingPayment(false);
       setPaymentStatus(null);
       setMpPublicKey(null);
       setMpInitialized(false);
+      
+      // ✅ Limpar campos do SDK do Mercado Pago via refs (se disponível)
+      if (cardNumberRef.current) {
+        try {
+          cardNumberRef.current?.clear?.();
+        } catch (e) {
+          // Ignorar erros
+        }
+      }
+      if (securityCodeRef.current) {
+        try {
+          securityCodeRef.current?.clear?.();
+        } catch (e) {
+          // Ignorar erros
+        }
+      }
+      if (expirationDateRef.current) {
+        try {
+          expirationDateRef.current?.clear?.();
+        } catch (e) {
+          // Ignorar erros
+        }
+      }
       setSplitPercentage(10); // Reset para default
     }
   }, [isOpen]);
@@ -383,30 +402,14 @@ export default function CheckoutModal({
       return;
     }
 
-    if (!cardNumber || !cardName || !cardExpiry || !cardCvv) {
-      setError('Preencha todos os campos do cartão');
+    // ✅ Validar apenas o nome do cartão (único campo que controlamos manualmente)
+    if (!cardName || cardName.trim().length < 3) {
+      setError('Nome no cartão é obrigatório e deve ter pelo menos 3 caracteres.');
       return;
     }
 
-    // Validação de formato básico
-    const cardNumberClean = cardNumber.replace(/\s/g, '');
-    if (cardNumberClean.length < 13 || cardNumberClean.length > 19) {
-      setError('Número do cartão inválido');
-      return;
-    }
-
-    // Validar data de expiração
-    const [month, year] = cardExpiry.split('/');
-    if (!month || !year || month.length !== 2 || year.length !== 2) {
-      setError('Data de validade inválida. Use o formato MM/AA');
-      return;
-    }
-
-    // Validar CVV
-    if (cardCvv.length < 3 || cardCvv.length > 4) {
-      setError('CVV inválido');
-      return;
-    }
+    // ✅ Os campos CardNumber, SecurityCode e ExpirationDate são validados pelo SDK do Mercado Pago
+    // Não precisamos validar manualmente - o createCardToken já faz isso
 
     setLoading(true);
     setError(null);
@@ -500,16 +503,12 @@ export default function CheckoutModal({
         return;
       }
       
-      // Validar nome do portador
-      if (!cardName || cardName.trim().length < 3) {
-        setError('Nome no cartão é obrigatório e deve ter pelo menos 3 caracteres.');
-        setLoading(false);
-        return;
-      }
-      
-      // Gerar token usando o SDK do Mercado Pago
+      // ✅ Gerar token usando o SDK do Mercado Pago
+      // O SDK valida automaticamente todos os campos (número, CVV, validade)
       let cardToken: string;
       try {
+        console.log('🔄 Gerando token do cartão com SDK do Mercado Pago...');
+        
         const tokenData = await createCardToken({
           cardholderName: cardName.trim(),
           identificationType: 'CPF',
@@ -517,15 +516,20 @@ export default function CheckoutModal({
         });
         
         if (!tokenData || !tokenData.id) {
-          setError('Não foi possível gerar o token do cartão. Verifique os dados e tente novamente.');
+          // ✅ O SDK retorna erro se os campos estiverem inválidos
+          const errorMessage = tokenData?.error?.message || 'Não foi possível gerar o token do cartão. Verifique se todos os campos estão preenchidos corretamente.';
+          setError(errorMessage);
           setLoading(false);
           return;
         }
         
         cardToken = tokenData.id;
+        console.log('✅ Token do cartão gerado com sucesso');
       } catch (tokenError: any) {
-        console.error('Erro ao gerar token do cartão:', tokenError);
-        setError(`Erro ao processar dados do cartão: ${tokenError.message || 'Erro desconhecido'}`);
+        console.error('❌ Erro ao gerar token do cartão:', tokenError);
+        // ✅ O SDK do Mercado Pago retorna erros detalhados sobre campos inválidos
+        const errorMessage = tokenError?.message || tokenError?.error?.message || 'Erro ao processar dados do cartão. Verifique se todos os campos estão preenchidos corretamente.';
+        setError(errorMessage);
         setLoading(false);
         return;
       }
@@ -557,27 +561,8 @@ export default function CheckoutModal({
     }
   };
 
-  const formatCardNumber = (value: string) => {
-    const v = value.replace(/\s+/g, '').replace(/[^0-9]/gi, '');
-    const matches = v.match(/\d{4,16}/g);
-    const match = (matches && matches[0]) || '';
-    const parts = [];
-    for (let i = 0, len = match.length; i < len; i += 4) {
-      parts.push(match.substring(i, i + 4));
-    }
-    if (parts.length) {
-      return parts.join(' ');
-    }
-    return v;
-  };
-
-  const formatExpiry = (value: string) => {
-    const v = value.replace(/\D/g, '');
-    if (v.length >= 2) {
-      return v.substring(0, 2) + '/' + v.substring(2, 4);
-    }
-    return v;
-  };
+  // ✅ Funções de formatação removidas - o SDK do Mercado Pago gerencia isso automaticamente
+  // Os componentes CardNumber, SecurityCode e ExpirationDate já fazem a formatação
 
   if (!isOpen) return null;
 
