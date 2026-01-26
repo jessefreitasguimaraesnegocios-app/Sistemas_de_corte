@@ -503,11 +503,55 @@ export default function CheckoutModal({
         return;
       }
       
+      // ✅ Verificar se os refs estão disponíveis
+      if (!cardNumberRef.current || !securityCodeRef.current || !expirationDateRef.current) {
+        setError('Campos do cartão não foram inicializados. Aguarde um momento e tente novamente.');
+        setLoading(false);
+        return;
+      }
+      
+      // ✅ CRÍTICO: Aguardar um tempo para garantir que os campos do SDK estão montados
+      // O SDK do Mercado Pago cria iframes internamente e precisa de tempo para montar
+      console.log('⏳ Aguardando campos do SDK estarem prontos...');
+      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 segundo para garantir montagem
+      
+      // ✅ Verificar se os campos estão realmente montados no DOM
+      // O SDK cria iframes internamente - verificamos se existem
+      const checkFieldsMounted = () => {
+        try {
+          // Verificar se os refs têm elementos filhos (iframes criados pelo SDK)
+          const cardNumberHasContent = cardNumberRef.current?.children?.length > 0 || 
+                                      cardNumberRef.current?.querySelector?.('iframe') ||
+                                      cardNumberRef.current?.querySelector?.('input');
+          const securityCodeHasContent = securityCodeRef.current?.children?.length > 0 || 
+                                         securityCodeRef.current?.querySelector?.('iframe') ||
+                                         securityCodeRef.current?.querySelector?.('input');
+          const expirationDateHasContent = expirationDateRef.current?.children?.length > 0 || 
+                                           expirationDateRef.current?.querySelector?.('iframe') ||
+                                           expirationDateRef.current?.querySelector?.('input');
+          
+          return !!(cardNumberHasContent && securityCodeHasContent && expirationDateHasContent);
+        } catch (e) {
+          console.error('Erro ao verificar campos:', e);
+          return false;
+        }
+      };
+      
+      if (!checkFieldsMounted()) {
+        console.warn('⚠️ Campos podem não estar totalmente montados, mas tentando mesmo assim...');
+        // Não bloquear - o SDK pode lidar com isso
+      }
+      
       // ✅ Gerar token usando o SDK do Mercado Pago
       // O SDK valida automaticamente todos os campos (número, CVV, validade)
       let cardToken: string;
       try {
         console.log('🔄 Gerando token do cartão com SDK do Mercado Pago...');
+        console.log('✅ Refs disponíveis:', {
+          cardNumber: !!cardNumberRef.current,
+          securityCode: !!securityCodeRef.current,
+          expirationDate: !!expirationDateRef.current
+        });
         
         const tokenData = await createCardToken({
           cardholderName: cardName.trim(),
