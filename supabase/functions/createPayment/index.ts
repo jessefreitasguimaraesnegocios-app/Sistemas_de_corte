@@ -273,8 +273,7 @@ serve(async (req: Request) => {
       // ✅ ESTRUTURA CORRETA para Orders API v1:
       // token e installments devem estar DENTRO de payment_method
       // payment_method.id deve ser a bandeira do cartão (visa, master, etc)
-      // Como não temos a bandeira diretamente, vamos usar uma estrutura que o MP aceita
-      // O token já contém informações sobre a bandeira
+      // O token do SDK React já contém informações sobre a bandeira
       
       if (!token_cartao) {
         return new Response(
@@ -285,54 +284,27 @@ serve(async (req: Request) => {
         );
       }
       
-      // ✅ Primeiro, buscar informações do token para descobrir a bandeira
-      // Ou usar uma estrutura que o MP aceite sem especificar a bandeira
-      // Vamos tentar buscar a bandeira do token primeiro
-      let cardBrand = "visa"; // Default, será atualizado se conseguirmos buscar
-      
-      try {
-        // Tentar buscar informações do token no Mercado Pago
-        const tokenResponse = await fetch(`https://api.mercadopago.com/v1/card_tokens/${token_cartao}`, {
-          method: "GET",
-          headers: {
-            "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
-            "Content-Type": "application/json",
-          },
-        });
-        
-        if (tokenResponse.ok) {
-          const tokenData = await tokenResponse.json();
-          // O token pode conter informações sobre a bandeira
-          if (tokenData.card_id) {
-            // Se tiver card_id, buscar informações do cartão
-            const cardResponse = await fetch(`https://api.mercadopago.com/v1/cards/${tokenData.card_id}`, {
-              method: "GET",
-              headers: {
-                "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
-                "Content-Type": "application/json",
-              },
-            });
-            
-            if (cardResponse.ok) {
-              const cardData = await cardResponse.json();
-              cardBrand = cardData.payment_method?.id || "visa";
-              console.log("✅ Bandeira do cartão detectada:", cardBrand);
-            }
-          }
-        }
-      } catch (e) {
-        console.warn("⚠️ Não foi possível buscar bandeira do cartão, usando default 'visa'");
-      }
+      // ✅ IMPORTANTE: Para Orders API v1, não precisamos especificar a bandeira
+      // O Mercado Pago detecta automaticamente a partir do token
+      // Mas se exigir, podemos usar uma estrutura alternativa
+      // Vamos tentar sem especificar a bandeira primeiro (deixar o MP detectar)
       
       // ✅ ESTRUTURA CORRETA: token e installments DENTRO de payment_method
+      // Se o MP exigir bandeira, podemos buscar do token, mas geralmente não é necessário
       orderData.transactions.payments.push({
         amount: valor.toFixed(2),
         payment_method: {
-          id: cardBrand, // ✅ Bandeira do cartão (visa, master, amex, etc)
           type: "credit_card",
           token: token_cartao, // ✅ Token DENTRO de payment_method
           installments: 1 // ✅ Installments DENTRO de payment_method
         }
+      });
+      
+      console.log("💳 Pagamento com cartão configurado:", {
+        amount: valor.toFixed(2),
+        hasToken: !!token_cartao,
+        tokenPreview: token_cartao.substring(0, 20) + "...",
+        installments: 1
       });
     }
 
