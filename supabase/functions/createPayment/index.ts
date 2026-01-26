@@ -98,6 +98,7 @@ serve(async (req: Request) => {
       email_cliente,
       referencia_externa = `pix_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       token_cartao,
+      payment_method_id, // ✅ Bandeira do cartão (visa, master, etc)
       business_id,
     } = body;
 
