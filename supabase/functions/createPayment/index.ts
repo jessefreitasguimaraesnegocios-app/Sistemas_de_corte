@@ -270,14 +270,69 @@ serve(async (req: Request) => {
         expiration_time: "P1D"
       });
     } else if (metodo_pagamento === "credit_card") {
+      // ✅ ESTRUTURA CORRETA para Orders API v1:
+      // token e installments devem estar DENTRO de payment_method
+      // payment_method.id deve ser a bandeira do cartão (visa, master, etc)
+      // Como não temos a bandeira diretamente, vamos usar uma estrutura que o MP aceita
+      // O token já contém informações sobre a bandeira
+      
+      if (!token_cartao) {
+        return new Response(
+          JSON.stringify({ 
+            error: "Token do cartão é obrigatório para pagamento com cartão de crédito."
+          }),
+          { status: 400, headers: corsHeaders }
+        );
+      }
+      
+      // ✅ Primeiro, buscar informações do token para descobrir a bandeira
+      // Ou usar uma estrutura que o MP aceite sem especificar a bandeira
+      // Vamos tentar buscar a bandeira do token primeiro
+      let cardBrand = "visa"; // Default, será atualizado se conseguirmos buscar
+      
+      try {
+        // Tentar buscar informações do token no Mercado Pago
+        const tokenResponse = await fetch(`https://api.mercadopago.com/v1/card_tokens/${token_cartao}`, {
+          method: "GET",
+          headers: {
+            "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
+            "Content-Type": "application/json",
+          },
+        });
+        
+        if (tokenResponse.ok) {
+          const tokenData = await tokenResponse.json();
+          // O token pode conter informações sobre a bandeira
+          if (tokenData.card_id) {
+            // Se tiver card_id, buscar informações do cartão
+            const cardResponse = await fetch(`https://api.mercadopago.com/v1/cards/${tokenData.card_id}`, {
+              method: "GET",
+              headers: {
+                "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
+                "Content-Type": "application/json",
+              },
+            });
+            
+            if (cardResponse.ok) {
+              const cardData = await cardResponse.json();
+              cardBrand = cardData.payment_method?.id || "visa";
+              console.log("✅ Bandeira do cartão detectada:", cardBrand);
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("⚠️ Não foi possível buscar bandeira do cartão, usando default 'visa'");
+      }
+      
+      // ✅ ESTRUTURA CORRETA: token e installments DENTRO de payment_method
       orderData.transactions.payments.push({
         amount: valor.toFixed(2),
         payment_method: {
-          id: "credit_card",
-          type: "credit_card"
-        },
-        token: token_cartao,
-        installments: 1
+          id: cardBrand, // ✅ Bandeira do cartão (visa, master, amex, etc)
+          type: "credit_card",
+          token: token_cartao, // ✅ Token DENTRO de payment_method
+          installments: 1 // ✅ Installments DENTRO de payment_method
+        }
       });
     }
 
