@@ -91,11 +91,13 @@ export default function CheckoutModal({
     }
   }, [isOpen, businessId]);
 
-  // Buscar public key do Mercado Pago quando o modal abrir e estiver na aba de cartão
+  // ✅ Buscar e inicializar SDK do Mercado Pago quando o modal abrir e estiver na aba de cartão
   useEffect(() => {
     if (isOpen && activeTab === 'card' && businessId && !mpPublicKey) {
       const fetchPublicKey = async () => {
         try {
+          console.log('🔑 Buscando public key do Mercado Pago...');
+          
           // Buscar public key do business
           const { data: businessData, error: businessError } = await supabase
             .from('businesses')
@@ -112,23 +114,33 @@ export default function CheckoutModal({
               });
               
               if (!keyError && keyData?.public_key) {
+                console.log('✅ Public key obtida via Edge Function');
                 setMpPublicKey(keyData.public_key);
-                initMercadoPago(keyData.public_key);
-                setMpInitialized(true);
+                // ✅ Inicializar SDK apenas uma vez
+                if (!mpInitialized) {
+                  initMercadoPago(keyData.public_key);
+                  setMpInitialized(true);
+                  console.log('✅ SDK do Mercado Pago inicializado');
+                }
                 return;
               }
             } catch (e) {
               console.error('Erro ao buscar public key via Edge Function:', e);
             }
             
-            setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor e salve no campo mp_public_key.');
+            setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor.');
             return;
           }
           
           if (businessData?.mp_public_key) {
+            console.log('✅ Public key obtida do banco de dados');
             setMpPublicKey(businessData.mp_public_key);
-            initMercadoPago(businessData.mp_public_key);
-            setMpInitialized(true);
+            // ✅ Inicializar SDK apenas uma vez
+            if (!mpInitialized) {
+              initMercadoPago(businessData.mp_public_key);
+              setMpInitialized(true);
+              console.log('✅ SDK do Mercado Pago inicializado');
+            }
           } else {
             // Tentar via Edge Function como fallback
             try {
@@ -137,15 +149,19 @@ export default function CheckoutModal({
               });
               
               if (!keyError && keyData?.public_key) {
+                console.log('✅ Public key obtida via Edge Function (fallback)');
                 setMpPublicKey(keyData.public_key);
-                initMercadoPago(keyData.public_key);
-                setMpInitialized(true);
+                if (!mpInitialized) {
+                  initMercadoPago(keyData.public_key);
+                  setMpInitialized(true);
+                  console.log('✅ SDK do Mercado Pago inicializado');
+                }
               } else {
-                setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor: https://www.mercadopago.com.br/developers/panel');
+                setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor.');
               }
             } catch (e) {
               console.error('Erro ao buscar public key:', e);
-              setError('Public key do Mercado Pago não configurada. Configure no painel do desenvolvedor.');
+              setError('Public key do Mercado Pago não configurada.');
             }
           }
         } catch (error) {
@@ -156,7 +172,7 @@ export default function CheckoutModal({
       
       fetchPublicKey();
     }
-  }, [isOpen, activeTab, businessId, mpPublicKey]);
+  }, [isOpen, activeTab, businessId, mpPublicKey, mpInitialized]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -515,55 +531,25 @@ export default function CheckoutModal({
         return;
       }
       
-      // ✅ Verificar se os refs estão disponíveis
+      // ✅ Verificar se os refs estão disponíveis (verificação básica)
       if (!cardNumberRef.current || !securityCodeRef.current || !expirationDateRef.current) {
-        setError('Campos do cartão não foram inicializados. Aguarde um momento e tente novamente.');
-        setLoading(false);
-        return;
+        console.warn('⚠️ Refs não disponíveis, mas tentando mesmo assim...');
+        // Não bloquear - o SDK pode lidar com isso se os componentes estiverem renderizados
       }
       
       // ✅ CRÍTICO: Aguardar um tempo para garantir que os campos do SDK estão montados
       // O SDK do Mercado Pago cria iframes internamente e precisa de tempo para montar
       console.log('⏳ Aguardando campos do SDK estarem prontos...');
-      await new Promise(resolve => setTimeout(resolve, 1000)); // 1 segundo para garantir montagem
-      
-      // ✅ Verificar se os campos estão realmente montados no DOM
-      // O SDK cria iframes internamente - verificamos se existem
-      const checkFieldsMounted = () => {
-        try {
-          // Verificar se os refs têm elementos filhos (iframes criados pelo SDK)
-          const cardNumberHasContent = cardNumberRef.current?.children?.length > 0 || 
-                                      cardNumberRef.current?.querySelector?.('iframe') ||
-                                      cardNumberRef.current?.querySelector?.('input');
-          const securityCodeHasContent = securityCodeRef.current?.children?.length > 0 || 
-                                         securityCodeRef.current?.querySelector?.('iframe') ||
-                                         securityCodeRef.current?.querySelector?.('input');
-          const expirationDateHasContent = expirationDateRef.current?.children?.length > 0 || 
-                                           expirationDateRef.current?.querySelector?.('iframe') ||
-                                           expirationDateRef.current?.querySelector?.('input');
-          
-          return !!(cardNumberHasContent && securityCodeHasContent && expirationDateHasContent);
-        } catch (e) {
-          console.error('Erro ao verificar campos:', e);
-          return false;
-        }
-      };
-      
-      if (!checkFieldsMounted()) {
-        console.warn('⚠️ Campos podem não estar totalmente montados, mas tentando mesmo assim...');
-        // Não bloquear - o SDK pode lidar com isso
-      }
+      await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 segundos para garantir montagem completa
       
       // ✅ Gerar token usando o SDK do Mercado Pago
       // O SDK valida automaticamente todos os campos (número, CVV, validade)
+      // Se os campos não estiverem prontos, o SDK retornará um erro claro
       let cardToken: string;
       try {
         console.log('🔄 Gerando token do cartão com SDK do Mercado Pago...');
-        console.log('✅ Refs disponíveis:', {
-          cardNumber: !!cardNumberRef.current,
-          securityCode: !!securityCodeRef.current,
-          expirationDate: !!expirationDateRef.current
-        });
+        console.log('✅ SDK inicializado:', mpInitialized);
+        console.log('✅ Public key disponível:', !!mpPublicKey);
         
         const tokenData = await createCardToken({
           cardholderName: cardName.trim(),
