@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { criarPagamentoPix, criarPagamentoCartao, verificarStatusPagamento } from '../services/paymentService';
@@ -44,9 +44,21 @@ export default function CheckoutModal({
   // Refs para os campos seguros do Mercado Pago
   // ✅ IMPORTANTE: Os campos CardNumber, SecurityCode e ExpirationDate são gerenciados pelo SDK
   // Não usamos useState para eles - o SDK gerencia o estado internamente
+  // ✅ Usar useRef para manter referências estáveis e evitar re-renderizações
   const cardNumberRef = useRef<any>(null);
   const securityCodeRef = useRef<any>(null);
   const expirationDateRef = useRef<any>(null);
+  
+  // ✅ Estilos dos campos do SDK - memoizados para evitar re-renderizações
+  const cardFieldStyle = useMemo(() => ({
+    fontSize: '15px',
+    fontFamily: 'monospace',
+    width: '100%',
+    border: 'none',
+    outline: 'none',
+    color: '#0f172a',
+    background: 'transparent'
+  }), []);
   
   // Taxa de split (buscar do business)
   const [splitPercentage, setSplitPercentage] = useState<number>(10); // Default 10%
@@ -782,28 +794,24 @@ export default function CheckoutModal({
                         </p>
                       </div>
                     ) : (
-                      <div className="space-y-4">
+                      <div className="space-y-3">
+                        {/* Número do Cartão */}
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">
+                          <label className="block text-xs font-bold text-slate-600 mb-1.5">
                             Número do Cartão
                           </label>
-                          <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                          <div className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 bg-white">
                             <CardNumber
                               ref={cardNumberRef}
                               placeholder="0000 0000 0000 0000"
-                              style={{ 
-                                fontSize: '16px',
-                                fontFamily: 'monospace',
-                                width: '100%',
-                                border: 'none',
-                                outline: 'none',
-                                color: '#0f172a'
-                              }}
+                              style={cardFieldStyle}
                             />
                           </div>
                         </div>
+
+                        {/* Nome no Cartão */}
                         <div>
-                          <label className="block text-sm font-semibold text-slate-700 mb-2">
+                          <label className="block text-xs font-bold text-slate-600 mb-1.5">
                             Nome no Cartão
                           </label>
                           <input
@@ -811,45 +819,33 @@ export default function CheckoutModal({
                             value={cardName}
                             onChange={(e) => setCardName(e.target.value.toUpperCase())}
                             placeholder="NOME COMPLETO"
-                            className="w-full px-4 py-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-900"
+                            className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-900 bg-white text-sm"
                           />
                         </div>
-                        <div className="grid grid-cols-2 gap-4">
+
+                        {/* Validade e CVV */}
+                        <div className="grid grid-cols-2 gap-3">
                           <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            <label className="block text-xs font-bold text-slate-600 mb-1.5">
                               Validade
                             </label>
-                            <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                            <div className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 bg-white">
                               <ExpirationDate
                                 ref={expirationDateRef}
                                 placeholder="MM/AA"
-                                style={{ 
-                                  fontSize: '16px',
-                                  fontFamily: 'monospace',
-                                  width: '100%',
-                                  border: 'none',
-                                  outline: 'none',
-                                  color: '#0f172a'
-                                }}
+                                style={cardFieldStyle}
                               />
                             </div>
                           </div>
                           <div>
-                            <label className="block text-sm font-semibold text-slate-700 mb-2">
+                            <label className="block text-xs font-bold text-slate-600 mb-1.5">
                               CVV
                             </label>
-                            <div className="w-full px-4 py-3 border border-slate-300 rounded-xl focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500">
+                            <div className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-indigo-500 bg-white">
                               <SecurityCode
                                 ref={securityCodeRef}
                                 placeholder="123"
-                                style={{ 
-                                  fontSize: '16px',
-                                  fontFamily: 'monospace',
-                                  width: '100%',
-                                  border: 'none',
-                                  outline: 'none',
-                                  color: '#0f172a'
-                                }}
+                                style={cardFieldStyle}
                               />
                             </div>
                           </div>
@@ -858,17 +854,17 @@ export default function CheckoutModal({
                     )}
                     <button
                       onClick={handleCardPayment}
-                      disabled={loading}
-                      className="w-full py-4 bg-indigo-600 text-white rounded-xl font-black text-lg hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-3"
+                      disabled={loading || !mpInitialized}
+                      className="w-full py-3 bg-indigo-600 text-white rounded-lg font-bold text-base hover:bg-indigo-700 transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 shadow-lg hover:shadow-xl"
                     >
                       {loading ? (
                         <>
-                          <Loader2 size={20} className="animate-spin" />
+                          <Loader2 size={18} className="animate-spin" />
                           Processando...
                         </>
                       ) : (
                         <>
-                          <CreditCard size={20} />
+                          <CreditCard size={18} />
                           Pagar R$ {total.toFixed(2)}
                         </>
                       )}
