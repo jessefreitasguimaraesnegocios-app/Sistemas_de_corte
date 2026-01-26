@@ -215,16 +215,21 @@ serve(async (req: Request) => {
     // - Vendedor (usa access_token do vendedor): recebe (valor - marketplace_fee)
     // - Plataforma (sponsor.id = MP_SPONSOR_ID): recebe marketplace_fee
     
-    if (!MP_SPONSOR_ID) {
-      console.error("❌ MP_SPONSOR_ID não configurado nos secrets");
+    // ✅ VALIDAR MP_SPONSOR_ID
+    if (!MP_SPONSOR_ID || MP_SPONSOR_ID.trim() === "") {
+      console.error("❌ MP_SPONSOR_ID não configurado ou vazio nos secrets");
+      console.error("❌ MP_SPONSOR_ID value:", MP_SPONSOR_ID);
       return new Response(
         JSON.stringify({ 
           error: "Configuração do marketplace incompleta.",
-          hint: "Configure o secret MP_SPONSOR_ID com o User ID da conta da plataforma (marketplace owner) no Supabase Dashboard → Edge Functions → Secrets."
+          details: "MP_SPONSOR_ID não está configurado ou está vazio.",
+          hint: "Configure o secret MP_SPONSOR_ID com o User ID da conta da plataforma (marketplace owner) no Supabase Dashboard → Edge Functions → createPayment → Secrets. O User ID deve ser o número da sua conta do Mercado Pago (ex: 2622924811)."
         }),
         { status: 500, headers: corsHeaders }
       );
     }
+    
+    console.log("✅ MP_SPONSOR_ID configurado:", MP_SPONSOR_ID);
     
     // ✅ Verificar se OAuth foi completado (necessário para usar access_token do vendedor)
     if (!business.mp_user_id) {
@@ -254,7 +259,7 @@ serve(async (req: Request) => {
       },
       integration_data: {
         sponsor: {
-          id: String(MP_SPONSOR_ID) // ✅ User ID da PLATAFORMA (marketplace owner)
+          id: String(MP_SPONSOR_ID).trim() // ✅ User ID da PLATAFORMA (marketplace owner)
         }
       }
     };
@@ -355,6 +360,8 @@ serve(async (req: Request) => {
       marketplaceFee: marketplace_fee,
       marketplaceFeeFormatted: orderData.marketplace_fee,
       sponsorId: MP_SPONSOR_ID, // ✅ ID da PLATAFORMA (marketplace owner)
+      sponsorIdType: typeof MP_SPONSOR_ID,
+      sponsorIdLength: MP_SPONSOR_ID?.length,
       businessId: business_id,
       businessMpUserId: business.mp_user_id, // ID do vendedor (para referência)
       tokenType: ACCESS_TOKEN_VENDEDOR?.startsWith("APP_USR-") ? "PRODUÇÃO (vendedor OAuth)" : 
@@ -363,7 +370,7 @@ serve(async (req: Request) => {
     });
     console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
     console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
-    console.log("✅ IMPORTANTE: Split configurado corretamente - sponsor.id = User ID da PLATAFORMA, marketplace_fee = comissão da plataforma");
+    console.log("✅ IMPORTANTE: Split configurado - sponsor.id =", orderData.integration_data.sponsor.id, "(User ID da PLATAFORMA)");
 
     // ✅ CHAMAR API MERCADO PAGO
     let mpResponse: Response;
