@@ -203,22 +203,25 @@ serve(async (req: Request) => {
     const COMISSAO_PERCENTUAL = business.revenue_split || 10;
     const marketplace_fee = Math.round(valor * (COMISSAO_PERCENTUAL / 100) * 100) / 100;
 
-    // ✅ SPONSOR_ID = User ID da PLATAFORMA (marketplace), não do vendedor
-    // No modelo marketplace do Mercado Pago:
-    // - Vendedor: usa seu access_token para criar o pagamento (business.mp_access_token)
-    // - Sponsor: é a plataforma que recebe a comissão (MP_SPONSOR_ID - secret global)
-    // 
-    // O mp_user_id do business é o ID do VENDEDOR, não deve ser usado como sponsor
-    // O sponsor deve ser o User ID da conta dona da aplicação (sistemasplit)
+    // ✅ SPLIT PAYMENT - Configuração do Marketplace
+    // No modelo marketplace do Mercado Pago com OAuth:
+    // - Vendedor: usa seu access_token (business.mp_access_token) obtido via OAuth
+    // - Sponsor: é o mp_user_id do VENDEDOR (business.mp_user_id) obtido via OAuth
+    // - Marketplace Fee: comissão que vai para a PLATAFORMA (não para o sponsor)
+    //
+    // IMPORTANTE: O sponsor.id deve ser o mp_user_id do VENDEDOR, não da plataforma!
+    // O Mercado Pago divide o pagamento entre:
+    // - Vendedor (sponsor.id = mp_user_id do vendedor): recebe (valor - marketplace_fee)
+    // - Plataforma (aplicação): recebe marketplace_fee automaticamente
     
-    if (!MP_SPONSOR_ID) {
-      console.error("❌ MP_SPONSOR_ID não configurado nos secrets");
+    if (!business.mp_user_id) {
+      console.error("❌ Business não possui mp_user_id (OAuth não completado)");
       return new Response(
         JSON.stringify({ 
-          error: "Configuração do marketplace incompleta.",
-          hint: "Configure o secret MP_SPONSOR_ID com o User ID da conta da plataforma."
+          error: "Estabelecimento não possui OAuth do Mercado Pago configurado.",
+          hint: "O estabelecimento precisa conectar sua conta do Mercado Pago via OAuth antes de processar pagamentos. Vá em Configurações → Integração Mercado Pago → Conectar."
         }),
-        { status: 500, headers: corsHeaders }
+        { status: 400, headers: corsHeaders }
       );
     }
 
@@ -238,7 +241,7 @@ serve(async (req: Request) => {
       },
       integration_data: {
         sponsor: {
-          id: String(MP_SPONSOR_ID) // User ID da PLATAFORMA (conta dona da aplicação)
+          id: String(business.mp_user_id) // ✅ User ID do VENDEDOR (obtido via OAuth)
         }
       }
     };
@@ -284,16 +287,16 @@ serve(async (req: Request) => {
       comissaoPercentual: COMISSAO_PERCENTUAL,
       marketplaceFee: marketplace_fee,
       marketplaceFeeFormatted: orderData.marketplace_fee,
-      sponsorId: MP_SPONSOR_ID,
+      sponsorId: business.mp_user_id, // ✅ ID do VENDEDOR (obtido via OAuth)
       businessId: business_id,
       businessMpUserId: business.mp_user_id,
-      // Verificar se o token é do vendedor (OAuth) ou da plataforma
       tokenType: ACCESS_TOKEN_VENDEDOR?.startsWith("APP_USR-") ? "PRODUÇÃO (vendedor OAuth)" : 
                  ACCESS_TOKEN_VENDEDOR?.startsWith("TEST-") ? "TESTE" : "DESCONHECIDO",
+      hasOAuth: !!(business.mp_access_token && business.mp_user_id),
     });
     console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
     console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
-    console.log("⚠️ IMPORTANTE: Para o split funcionar, o token DEVE ser do VENDEDOR (obtido via OAuth), não da plataforma!");
+    console.log("✅ IMPORTANTE: Split configurado corretamente - sponsor.id = mp_user_id do vendedor, marketplace_fee = comissão da plataforma");
 
     // ✅ CHAMAR API MERCADO PAGO
     let mpResponse: Response;

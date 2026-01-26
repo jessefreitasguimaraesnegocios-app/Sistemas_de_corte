@@ -378,7 +378,9 @@ serve(async (req: Request) => {
         business_id: transaction.business_id,
         payment_id: transaction.payment_id,
         external_reference: transaction.external_reference,
+        current_status: transaction.status || "N/A",
       });
+      console.log("🔥🔥🔥 WEBHOOK PROCESSANDO - Payment ID:", resourceId, "Type:", webhookType, "Action:", webhookData.action);
 
       // Buscar business para obter access token e buscar status atualizado
       const { data: business, error: businessError } = await supabase

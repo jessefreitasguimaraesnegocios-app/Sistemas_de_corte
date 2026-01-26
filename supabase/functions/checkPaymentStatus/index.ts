@@ -187,62 +187,77 @@ serve(async (req: Request) => {
           mpStatus = mpData.status || "pending";
           isApproved = mpStatus === "approved";
         }
-      } else {
-        // API de Orders (ID alfanumérico como PAY01KFEQG1GVG9AJ3359WVY12A35)
-        console.log("📦 Payment ID alfanumérico detectado - tentando buscar via Orders API");
-        
-        // Extrair order_id do external_reference (formato: pix_xxx|ORD...)
-        const orderIdMatch = transaction.external_reference?.match(/\|(ORD[A-Z0-9]+)$/);
-        const orderId = orderIdMatch ? orderIdMatch[1] : null;
-        
-        if (orderId) {
-          console.log("🔍 Buscando Order:", orderId);
+        } else {
+          // API de Orders (ID alfanumérico como PAY01KFEQG1GVG9AJ3359WVY12A35)
+          console.log("📦 Payment ID alfanumérico detectado (Orders API) - tentando buscar via Orders API");
+          console.log("🔍 External reference:", transaction.external_reference);
           
-          const orderResponse = await fetch(
-            `https://api.mercadopago.com/v1/orders/${orderId}`,
-            {
-              headers: {
-                "Authorization": `Bearer ${businessData.mp_access_token}`,
-              },
-            }
-          );
+          // Extrair order_id do external_reference (formato: pix_xxx|ORD...)
+          const orderIdMatch = transaction.external_reference?.match(/\|(ORD[A-Z0-9]+)$/);
+          const orderId = orderIdMatch ? orderIdMatch[1] : null;
+          
+          if (orderId) {
+            console.log("🔍 Buscando Order na API do MP:", orderId);
+            
+            const orderResponse = await fetch(
+              `https://api.mercadopago.com/v1/orders/${orderId}`,
+              {
+                headers: {
+                  "Authorization": `Bearer ${businessData.mp_access_token}`,
+                },
+              }
+            );
 
-          if (orderResponse.ok) {
-            const orderData = await orderResponse.json();
-            console.log("📊 Resposta da API Orders:", { 
-              status: orderData.status, 
-              status_detail: orderData.status_detail,
-              payments: orderData.transactions?.payments?.length 
-            });
-            
-            // Verificar status dos payments dentro da order
-            const payments = orderData.transactions?.payments || [];
-            const approvedPayment = payments.find((p: any) => p.status === "approved");
-            
-            if (approvedPayment) {
-              mpStatus = "approved";
-              isApproved = true;
-              console.log("✅ Payment aprovado encontrado na Order");
-            } else if (orderData.status === "paid" || orderData.status === "closed") {
-              mpStatus = "approved";
-              isApproved = true;
-              console.log("✅ Order com status paid/closed");
+            if (orderResponse.ok) {
+              const orderData = await orderResponse.json();
+              console.log("📊 Resposta da API Orders:", { 
+                orderId: orderData.id,
+                status: orderData.status, 
+                status_detail: orderData.status_detail,
+                paymentsCount: orderData.transactions?.payments?.length,
+                payments: orderData.transactions?.payments?.map((p: any) => ({
+                  id: p.id,
+                  status: p.status,
+                  status_detail: p.status_detail
+                }))
+              });
+              
+              // Verificar status dos payments dentro da order
+              const payments = orderData.transactions?.payments || [];
+              const approvedPayment = payments.find((p: any) => p.status === "approved");
+              
+              if (approvedPayment) {
+                mpStatus = "approved";
+                isApproved = true;
+                console.log("✅✅✅ Payment APROVADO encontrado na Order! ID:", approvedPayment.id);
+              } else if (orderData.status === "paid" || orderData.status === "closed") {
+                mpStatus = "approved";
+                isApproved = true;
+                console.log("✅✅✅ Order com status paid/closed - APROVADO!");
+              } else {
+                mpStatus = orderData.status || "pending";
+                console.log("⏳ Order ainda pendente:", orderData.status);
+                console.log("📋 Payments na order:", payments.map((p: any) => `${p.id}: ${p.status}`).join(", "));
+              }
             } else {
-              mpStatus = orderData.status || "pending";
-              console.log("⏳ Order ainda pendente:", orderData.status);
+              const errorText = await orderResponse.text();
+              console.error("❌ Erro ao buscar Order:", {
+                status: orderResponse.status,
+                statusText: orderResponse.statusText,
+                error: errorText.substring(0, 200)
+              });
+              console.log("⚠️ Não foi possível buscar Order - mantendo status do banco");
             }
           } else {
-            console.log("⚠️ Não foi possível buscar Order - mantendo status do banco");
-          }
-        } else {
-          console.log("⚠️ Order ID não encontrado no external_reference - mantendo status do banco");
-          // Se o status no banco já é PAID, considerar aprovado
-          if (transaction.status?.toUpperCase() === "PAID") {
-            isApproved = true;
-            mpStatus = "approved";
+            console.log("⚠️ Order ID não encontrado no external_reference:", transaction.external_reference);
+            // Se o status no banco já é PAID, considerar aprovado
+            if (transaction.status?.toUpperCase() === "PAID") {
+              isApproved = true;
+              mpStatus = "approved";
+              console.log("✅ Status PAID no banco - considerando aprovado");
+            }
           }
         }
-      }
     } catch (mpError) {
       console.error("❌ Erro ao consultar API do Mercado Pago:", mpError);
     }
