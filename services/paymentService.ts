@@ -239,7 +239,8 @@ export async function criarPagamentoCartao(
   valor: number,
   email: string,
   tokenCartao: string,
-  businessId?: string
+  businessId?: string,
+  paymentMethodId?: string | null // ✅ Bandeira do cartão (visa, master, etc)
 ): Promise<CreditCardPaymentResponse> {
   try {
     if (!tokenCartao) {
@@ -265,6 +266,7 @@ export async function criarPagamentoCartao(
       metodo_pagamento: 'credit_card',
       email_cliente: email,
       token_cartao: tokenCartao,
+      payment_method_id: paymentMethodId || null, // ✅ Bandeira do cartão
       business_id: businessId,
       referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     };

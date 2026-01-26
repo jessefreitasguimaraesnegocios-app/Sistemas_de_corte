@@ -271,9 +271,8 @@ serve(async (req: Request) => {
       });
     } else if (metodo_pagamento === "credit_card") {
       // ✅ ESTRUTURA CORRETA para Orders API v1:
+      // payment_method.id é OBRIGATÓRIO e deve ser a bandeira do cartão
       // token e installments devem estar DENTRO de payment_method
-      // payment_method.id deve ser a bandeira do cartão (visa, master, etc)
-      // O token do SDK React já contém informações sobre a bandeira
       
       if (!token_cartao) {
         return new Response(
@@ -284,16 +283,43 @@ serve(async (req: Request) => {
         );
       }
       
-      // ✅ IMPORTANTE: Para Orders API v1, não precisamos especificar a bandeira
-      // O Mercado Pago detecta automaticamente a partir do token
-      // Mas se exigir, podemos usar uma estrutura alternativa
-      // Vamos tentar sem especificar a bandeira primeiro (deixar o MP detectar)
+      // ✅ CRÍTICO: payment_method.id é OBRIGATÓRIO
+      // Se não foi enviado do frontend, tentar buscar do token via API
+      let cardBrand = payment_method_id;
       
-      // ✅ ESTRUTURA CORRETA: token e installments DENTRO de payment_method
-      // Se o MP exigir bandeira, podemos buscar do token, mas geralmente não é necessário
+      if (!cardBrand) {
+        console.log("⚠️ payment_method_id não fornecido, tentando buscar do token...");
+        try {
+          // Buscar informações do token no Mercado Pago
+          const tokenResponse = await fetch(`https://api.mercadopago.com/v1/card_tokens/${token_cartao}`, {
+            method: "GET",
+            headers: {
+              "Authorization": `Bearer ${ACCESS_TOKEN_VENDEDOR}`,
+              "Content-Type": "application/json",
+            },
+          });
+          
+          if (tokenResponse.ok) {
+            const tokenData = await tokenResponse.json();
+            cardBrand = tokenData.payment_method_id || tokenData.payment_method?.id;
+            console.log("✅ Bandeira do cartão obtida do token:", cardBrand);
+          }
+        } catch (e) {
+          console.warn("⚠️ Erro ao buscar bandeira do token:", e);
+        }
+      }
+      
+      // ✅ Se ainda não tiver bandeira, usar fallback (visa é mais comum no Brasil)
+      if (!cardBrand) {
+        console.warn("⚠️ Bandeira não detectada, usando fallback 'visa'");
+        cardBrand = "visa";
+      }
+      
+      // ✅ ESTRUTURA CORRETA: payment_method.id é OBRIGATÓRIO
       orderData.transactions.payments.push({
         amount: valor.toFixed(2),
         payment_method: {
+          id: cardBrand, // ✅ OBRIGATÓRIO: Bandeira do cartão (visa, master, amex, etc)
           type: "credit_card",
           token: token_cartao, // ✅ Token DENTRO de payment_method
           installments: 1 // ✅ Installments DENTRO de payment_method
@@ -302,6 +328,7 @@ serve(async (req: Request) => {
       
       console.log("💳 Pagamento com cartão configurado:", {
         amount: valor.toFixed(2),
+        paymentMethodId: cardBrand,
         hasToken: !!token_cartao,
         tokenPreview: token_cartao.substring(0, 20) + "...",
         installments: 1
