@@ -402,13 +402,10 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
     }
 
     try {
-      // Construir redirect URI dinamicamente baseado na URL atual
-      const redirectUri = `${window.location.origin}/oauth/callback`;
-      
       console.log('🔐 Chamando getMpOauthUrl:', {
         businessId: business.id,
-        redirectUri,
         supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
+        note: 'redirect_uri será obtido do secret MP_REDIRECT_URI (garante consistência)'
       });
 
       // ✅ FUNÇÃO É PÚBLICA (verify_jwt = false) - usar fetch direto
@@ -423,7 +420,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
         },
         body: JSON.stringify({
           business_id: business.id,
-          redirect_uri: redirectUri, // URL dinâmica do frontend
+          // ✅ SEGURANÇA: Não enviar redirect_uri - será usado do secret
+          // Isso garante que o mesmo redirect_uri será usado na autorização e no callback
         }),
       });
 
@@ -460,7 +458,8 @@ const BusinessOwnerDashboard = ({ business, collaborators, products, services, a
 
       console.log('✅ URL OAuth recebida com sucesso!');
       console.log('✅ Redirecionando para:', oauthUrl);
-      console.log('⚠️ IMPORTANTE: Certifique-se de que o redirect_uri está cadastrado no painel do Mercado Pago:', redirectUri);
+      console.log('⚠️ IMPORTANTE: O redirect_uri usado será o configurado no secret MP_REDIRECT_URI');
+      console.log('⚠️ Certifique-se de que esse redirect_uri está cadastrado no painel do Mercado Pago');
       
       // ✅ Salvar aba atual para restaurar após OAuth
       // O botão está na aba SETTINGS, então salvamos isso

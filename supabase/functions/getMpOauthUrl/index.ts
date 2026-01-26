@@ -45,7 +45,7 @@ serve(async (req: Request) => {
     });
 
     // Ler body primeiro
-    const { business_id, redirect_uri } = await req.json();
+    const { business_id } = await req.json();
 
     if (!business_id) {
       return new Response(
@@ -65,22 +65,22 @@ serve(async (req: Request) => {
       );
     }
 
-    // Usar redirect_uri do body (dinâmico do frontend) ou fallback para secret
-    // Isso permite funcionar em dev (localhost) e produção (vercel) sem reconfigurar secrets
-    const finalRedirectUri = redirect_uri || MP_REDIRECT_URI;
+    // ✅ SEGURANÇA: SEMPRE usar redirect_uri do secret, NUNCA do body
+    // O redirect_uri deve ser EXATAMENTE o mesmo usado no callback (mp-oauth-callback)
+    // Isso garante consistência e segurança (evita redirect_uri malicioso)
+    const finalRedirectUri = MP_REDIRECT_URI;
     
-    // redirect_uri é obrigatório, mas pode vir do body OU do secret
     if (!finalRedirectUri) {
       return new Response(
         JSON.stringify({ 
-          error: "redirect_uri é obrigatório",
-          hint: "Passe redirect_uri no body da requisição OU configure o secret MP_REDIRECT_URI no Supabase Dashboard"
+          error: "MP_REDIRECT_URI não configurado nos secrets",
+          hint: "Configure o secret MP_REDIRECT_URI no Supabase Dashboard. O valor deve ser EXATAMENTE o mesmo cadastrado no painel do Mercado Pago."
         }),
         { status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" } }
       );
     }
 
-    console.log("✅ Usando redirect_uri:", finalRedirectUri);
+    console.log("✅ Usando redirect_uri do secret:", finalRedirectUri);
 
     // Construir URL de OAuth do Mercado Pago
     // 🔥 IMPORTANTE: O scope define as permissões que o marketplace precisa
