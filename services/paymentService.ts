@@ -228,11 +228,13 @@ export async function criarPagamentoPix(
 }
 
 /**
- * Cria um pagamento com cartão de crédito via Mercado Pago
+ * Cria um pagamento com cartão (crédito ou débito) via Mercado Pago
  * @param valor Valor do pagamento em reais
  * @param email Email do cliente
  * @param tokenCartao Token do cartão gerado pelo Mercado Pago SDK
  * @param businessId ID do negócio (opcional)
+ * @param paymentMethodId Bandeira do cartão (visa, master, etc) - opcional
+ * @param cardType 'credit_card' ou 'debit_card' - padrão crédito
  * @returns Resposta com resultado do pagamento
  */
 export async function criarPagamentoCartao(
@@ -240,7 +242,8 @@ export async function criarPagamentoCartao(
   email: string,
   tokenCartao: string,
   businessId?: string,
-  paymentMethodId?: string | null // ✅ Bandeira do cartão (visa, master, etc)
+  paymentMethodId?: string | null,
+  cardType: 'credit_card' | 'debit_card' = 'credit_card'
 ): Promise<CreditCardPaymentResponse> {
   try {
     if (!tokenCartao) {
@@ -254,8 +257,9 @@ export async function criarPagamentoCartao(
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
     const functionUrl = `${supabaseUrl}/functions/v1/createPayment`;
+    const refPrefix = cardType === 'debit_card' ? 'cd' : 'cc';
     
-    console.log('📤 Chamando createPayment Edge Function (Cartão) - função pública...', {
+    console.log(`📤 Chamando createPayment Edge Function (${cardType === 'debit_card' ? 'Cartão Débito' : 'Cartão Crédito'}) - função pública...`, {
       url: functionUrl,
       businessId,
       valor,
@@ -263,12 +267,12 @@ export async function criarPagamentoCartao(
     
     const requestBody = {
       valor,
-      metodo_pagamento: 'credit_card',
+      metodo_pagamento: cardType,
       email_cliente: email,
       token_cartao: tokenCartao,
-      payment_method_id: paymentMethodId || null, // ✅ Bandeira do cartão
+      payment_method_id: paymentMethodId || null,
       business_id: businessId,
-      referencia_externa: `cc_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      referencia_externa: `${refPrefix}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
     };
     
     let responseData: any = null;

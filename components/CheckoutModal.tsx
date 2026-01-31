@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy } from 'lucide-react';
+import { X, CreditCard, QrCode, Loader2, CheckCircle2, AlertCircle, Copy, Banknote } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { criarPagamentoPix, criarPagamentoCartao, verificarStatusPagamento } from '../services/paymentService';
 import { PixPaymentResponse, CreditCardPaymentResponse } from '../types';
@@ -16,7 +16,7 @@ interface CheckoutModalProps {
   productId?: string; // ID do produto para buscar business_id correto
 }
 
-type PaymentTab = 'pix' | 'card';
+type PaymentTab = 'pix' | 'card' | 'debit';
 
 export default function CheckoutModal({
   isOpen,
@@ -91,9 +91,9 @@ export default function CheckoutModal({
     }
   }, [isOpen, businessId]);
 
-  // ✅ Buscar e inicializar SDK do Mercado Pago quando o modal abrir e estiver na aba de cartão
+  // ✅ Buscar e inicializar SDK do Mercado Pago quando o modal abrir e estiver na aba de cartão (crédito ou débito)
   useEffect(() => {
-    if (isOpen && activeTab === 'card' && businessId && !mpPublicKey) {
+    if (isOpen && (activeTab === 'card' || activeTab === 'debit') && businessId && !mpPublicKey) {
       const fetchPublicKey = async () => {
         try {
           console.log('🔑 Buscando public key do Mercado Pago...');
@@ -589,13 +589,15 @@ export default function CheckoutModal({
         return;
       }
       
-      // ✅ Enviar token E payment_method_id para a Edge Function
+      // ✅ Enviar token E payment_method_id para a Edge Function (crédito ou débito conforme aba)
+      const cardType = activeTab === 'debit' ? 'debit_card' : 'credit_card';
       const response = await criarPagamentoCartao(
         total, 
         email, 
         cardToken, 
         validBusinessId,
-        paymentMethodId // ✅ Bandeira do cartão (pode ser null, backend vai buscar)
+        paymentMethodId,
+        cardType
       );
       
       if (response.success && response.status === 'approved') {
@@ -673,15 +675,28 @@ export default function CheckoutModal({
             </button>
             <button
               onClick={() => setActiveTab('card')}
-              className={`flex-1 px-6 py-4 font-bold text-sm transition-colors ${
+              className={`flex-1 px-4 py-4 font-bold text-sm transition-colors ${
                 activeTab === 'card'
                   ? 'text-indigo-600 border-b-2 border-indigo-600'
                   : 'text-slate-400 hover:text-slate-600'
               }`}
             >
-              <div className="flex items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-1">
                 <CreditCard size={18} />
-                Cartão de Crédito
+                Crédito
+              </div>
+            </button>
+            <button
+              onClick={() => setActiveTab('debit')}
+              className={`flex-1 px-4 py-4 font-bold text-sm transition-colors ${
+                activeTab === 'debit'
+                  ? 'text-indigo-600 border-b-2 border-indigo-600'
+                  : 'text-slate-400 hover:text-slate-600'
+              }`}
+            >
+              <div className="flex items-center justify-center gap-1">
+                <Banknote size={18} />
+                Débito
               </div>
             </button>
           </div>
@@ -787,8 +802,8 @@ export default function CheckoutModal({
               </div>
             )}
 
-            {/* Card Tab */}
-            {activeTab === 'card' && (
+            {/* Card Tab (Crédito e Débito - mesmo formulário) */}
+            {(activeTab === 'card' || activeTab === 'debit') && (
               <div className="space-y-6">
                 {!cardData ? (
                   <>
@@ -870,8 +885,8 @@ export default function CheckoutModal({
                         </>
                       ) : (
                         <>
-                          <CreditCard size={18} />
-                          Pagar R$ {total.toFixed(2)}
+                          {activeTab === 'debit' ? <Banknote size={18} /> : <CreditCard size={18} />}
+                          {activeTab === 'debit' ? `Pagar com Débito R$ ${total.toFixed(2)}` : `Pagar R$ ${total.toFixed(2)}`}
                         </>
                       )}
                     </button>

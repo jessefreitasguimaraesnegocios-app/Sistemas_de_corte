@@ -148,14 +148,14 @@ serve(async (req: Request) => {
       );
     }
 
-    if (metodo_pagamento !== "pix" && metodo_pagamento !== "credit_card") {
+    if (metodo_pagamento !== "pix" && metodo_pagamento !== "credit_card" && metodo_pagamento !== "debit_card") {
       return new Response(
-        JSON.stringify({ error: "Método de pagamento inválido. Use 'pix' ou 'credit_card'." }),
+        JSON.stringify({ error: "Método de pagamento inválido. Use 'pix', 'credit_card' ou 'debit_card'." }),
         { status: 400, headers: corsHeaders }
       );
     }
 
-    if (metodo_pagamento === "credit_card" && !token_cartao) {
+    if ((metodo_pagamento === "credit_card" || metodo_pagamento === "debit_card") && !token_cartao) {
       return new Response(
         JSON.stringify({ error: "Token do cartão é obrigatório para pagamento com cartão." }),
         { status: 400, headers: corsHeaders }
@@ -215,21 +215,16 @@ serve(async (req: Request) => {
     // - Vendedor (usa access_token do vendedor): recebe (valor - marketplace_fee)
     // - Plataforma (sponsor.id = MP_SPONSOR_ID): recebe marketplace_fee
     
-    // ✅ VALIDAR MP_SPONSOR_ID
-    if (!MP_SPONSOR_ID || MP_SPONSOR_ID.trim() === "") {
-      console.error("❌ MP_SPONSOR_ID não configurado ou vazio nos secrets");
-      console.error("❌ MP_SPONSOR_ID value:", MP_SPONSOR_ID);
-      return new Response(
-        JSON.stringify({ 
-          error: "Configuração do marketplace incompleta.",
-          details: "MP_SPONSOR_ID não está configurado ou está vazio.",
-          hint: "Configure o secret MP_SPONSOR_ID com o User ID da conta da plataforma (marketplace owner) no Supabase Dashboard → Edge Functions → createPayment → Secrets. O User ID deve ser o número da sua conta do Mercado Pago (ex: 2622924811)."
-        }),
-        { status: 500, headers: corsHeaders }
-      );
-    }
+    // ✅ MP_SPONSOR_ID: se não configurado, pagamento segue SEM split (100% para o vendedor)
+    const hasSponsorId = MP_SPONSOR_ID && String(MP_SPONSOR_ID).trim() !== "";
+    const sponsorIdNum = hasSponsorId ? parseInt(String(MP_SPONSOR_ID).trim(), 10) : 0;
+    const sponsorIdValid = hasSponsorId && !isNaN(sponsorIdNum) && sponsorIdNum > 0;
     
-    console.log("✅ MP_SPONSOR_ID configurado:", MP_SPONSOR_ID);
+    if (!sponsorIdValid) {
+      console.warn("⚠️ MP_SPONSOR_ID não configurado ou inválido - pagamento será criado SEM split (100% para o vendedor). Configure o secret para ativar a comissão da plataforma.");
+    } else {
+      console.log("✅ MP_SPONSOR_ID configurado:", MP_SPONSOR_ID);
+    }
     
     // ✅ Verificar se OAuth foi completado (necessário para usar access_token do vendedor)
     if (!business.mp_user_id) {
@@ -257,24 +252,27 @@ serve(async (req: Request) => {
       transactions: {
         payments: []
       },
-      integration_data: {
-        sponsor: {
-          id: String(MP_SPONSOR_ID).trim() // ✅ User ID da PLATAFORMA (marketplace owner)
-        }
-      }
     };
 
+    // ✅ Incluir split (integration_data + marketplace_fee) APENAS se MP_SPONSOR_ID for válido
+    if (sponsorIdValid) {
+      orderData.integration_data = {
+        sponsor: {
+          id: String(sponsorIdNum) // API exige string
+        }
+      };
+      if (marketplace_fee > 0) {
+        orderData.marketplace_fee = marketplace_fee.toFixed(2);
+      }
+    } else {
+      console.log("ℹ️ Ordem criada sem split - configure MP_SPONSOR_ID para ativar comissão da plataforma.");
+    }
+
     // ✅ NOTA: A API Orders v1 não suporta notification_url no body
-    // Os webhooks são configurados no painel do Mercado Pago em "Webhooks"
-    // Certifique-se de que o evento "Order (Mercado Pago)" está habilitado
     if (MP_WEBHOOK_URL) {
       console.log("📢 Webhook configurado no painel MP:", MP_WEBHOOK_URL);
     } else {
       console.warn("⚠️ MP_WEBHOOK_URL não configurada nos secrets - verifique configuração no painel MP");
-    }
-
-    if (marketplace_fee > 0) {
-      orderData.marketplace_fee = marketplace_fee.toFixed(2);
     }
 
     // ✅ CONFIGURAR PAGAMENTO BASEADO NO MÉTODO
@@ -287,15 +285,16 @@ serve(async (req: Request) => {
         },
         expiration_time: "P1D"
       });
-    } else if (metodo_pagamento === "credit_card") {
+    } else if (metodo_pagamento === "credit_card" || metodo_pagamento === "debit_card") {
       // ✅ ESTRUTURA CORRETA para Orders API v1:
       // payment_method.id é OBRIGATÓRIO e deve ser a bandeira do cartão
       // token e installments devem estar DENTRO de payment_method
+      // type: "credit_card" ou "debit_card" conforme documentação MP
       
       if (!token_cartao) {
         return new Response(
           JSON.stringify({ 
-            error: "Token do cartão é obrigatório para pagamento com cartão de crédito."
+            error: "Token do cartão é obrigatório para pagamento com cartão."
           }),
           { status: 400, headers: corsHeaders }
         );
@@ -333,44 +332,50 @@ serve(async (req: Request) => {
         cardBrand = "visa";
       }
       
+      const cardType = metodo_pagamento === "debit_card" ? "debit_card" : "credit_card";
+      // Débito: sempre 1x; crédito: 1 por padrão (pode evoluir para parcelas)
+      const installments = metodo_pagamento === "debit_card" ? 1 : 1;
+      
       // ✅ ESTRUTURA CORRETA: payment_method.id é OBRIGATÓRIO
       orderData.transactions.payments.push({
         amount: valor.toFixed(2),
         payment_method: {
           id: cardBrand, // ✅ OBRIGATÓRIO: Bandeira do cartão (visa, master, amex, etc)
-          type: "credit_card",
+          type: cardType, // "credit_card" ou "debit_card"
           token: token_cartao, // ✅ Token DENTRO de payment_method
-          installments: 1 // ✅ Installments DENTRO de payment_method
+          installments
         }
       });
       
-      console.log("💳 Pagamento com cartão configurado:", {
+      console.log(`💳 Pagamento com cartão (${cardType}) configurado:`, {
         amount: valor.toFixed(2),
         paymentMethodId: cardBrand,
         hasToken: !!token_cartao,
         tokenPreview: token_cartao.substring(0, 20) + "...",
-        installments: 1
+        installments
       });
     }
 
     console.log("📤 Chamando API Mercado Pago...");
-    console.log("💰 Split configurado:", {
+    console.log("💰 Pagamento configurado:", {
       valorTotal: valor,
       comissaoPercentual: COMISSAO_PERCENTUAL,
       marketplaceFee: marketplace_fee,
-      marketplaceFeeFormatted: orderData.marketplace_fee,
-      sponsorId: MP_SPONSOR_ID, // ✅ ID da PLATAFORMA (marketplace owner)
-      sponsorIdType: typeof MP_SPONSOR_ID,
-      sponsorIdLength: MP_SPONSOR_ID?.length,
+      splitAtivo: sponsorIdValid,
+      sponsorId: sponsorIdValid ? sponsorIdNum : "(não configurado)",
       businessId: business_id,
-      businessMpUserId: business.mp_user_id, // ID do vendedor (para referência)
+      businessMpUserId: business.mp_user_id,
       tokenType: ACCESS_TOKEN_VENDEDOR?.startsWith("APP_USR-") ? "PRODUÇÃO (vendedor OAuth)" : 
                  ACCESS_TOKEN_VENDEDOR?.startsWith("TEST-") ? "TESTE" : "DESCONHECIDO",
       hasOAuth: !!(business.mp_access_token && business.mp_user_id),
     });
     console.log("📦 OrderData sendo enviado ao MP:", JSON.stringify(orderData, null, 2));
     console.log("🔑 Access Token (preview):", ACCESS_TOKEN_VENDEDOR ? `${ACCESS_TOKEN_VENDEDOR.substring(0, 20)}...` : 'MISSING');
-    console.log("✅ IMPORTANTE: Split configurado - sponsor.id =", orderData.integration_data.sponsor.id, "(User ID da PLATAFORMA)");
+    if (orderData.integration_data?.sponsor?.id != null) {
+      console.log("✅ Split ativo - sponsor.id =", orderData.integration_data.sponsor.id, "(User ID da PLATAFORMA)");
+    } else {
+      console.log("ℹ️ Pagamento sem split (100% para o vendedor)");
+    }
 
     // ✅ CHAMAR API MERCADO PAGO
     let mpResponse: Response;

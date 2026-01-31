@@ -1,11 +1,20 @@
 # 🔧 Configuração do MP_SPONSOR_ID (User ID da Plataforma)
 
-## ❌ Erro Atual
+## ✅ Comportamento Atual (corrigido)
+
+- **Se `MP_SPONSOR_ID` NÃO estiver configurado ou for inválido:** o pagamento é criado **sem split** (100% para o vendedor). PIX e Cartão funcionam normalmente.
+- **Se `MP_SPONSOR_ID` estiver configurado corretamente:** o pagamento usa split (comissão para a plataforma).
+
+Assim, PIX e Cartão **sempre funcionam**. O split só entra quando o secret estiver correto.
+
+## ❌ Erro que ocorria antes
 
 ```
 order_invalid_sponsor_id
 Order sponsor id is invalid.
 ```
+
+(Ocorria quando `sponsor.id` era enviado com valor inválido. Agora, se não houver MP_SPONSOR_ID válido, o payload não envia `integration_data` e o pagamento segue sem split.)
 
 ## 🎯 O Que É MP_SPONSOR_ID?
 
